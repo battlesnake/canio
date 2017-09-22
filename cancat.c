@@ -16,7 +16,7 @@
 
 #include "canio.h"
 
-int set_stdin_char_mode(bool enable)
+int set_stdin_char_mode(bool enable, bool signals)
 {
 	static struct termios old;
 	static bool first = true;
@@ -29,8 +29,10 @@ int set_stdin_char_mode(bool enable)
 	}
 	struct termios now = old;
 	if (enable) {
-		now.c_lflag &= ~(ICANON | ECHO | ECHOCTL);
-		now.c_lflag |= ISIG;
+		now.c_lflag &= ~(ICANON | ECHO | ECHOCTL | ISIG);
+		if (signals) {
+			now.c_lflag |= ISIG;
+		}
 		now.c_cc[VMIN] = 1;
 		now.c_cc[VTIME] = 2;
 	}
@@ -44,20 +46,22 @@ int set_stdin_char_mode(bool enable)
 int main(int argc, char *argv[])
 {
 	bool master = false;
+	bool signals = true;
 	int node_id = -1;
 	const char *iface = NULL;
 
 	int c;
-	while ((c = getopt(argc, argv, "mn:i:")) != -1) {
+	while ((c = getopt(argc, argv, "mMn:i:")) != -1) {
 		switch (c) {
 		case 'm': master = true; break;
+		case 'M': master = true; signals = false; break;
 		case 'n': node_id = atoi(optarg); break;
 		case 'i': iface = optarg; break;
 		default: error("Invalid argument: '%c'", c); return 1;
 		}
 	}
 	if (node_id < 0 || !iface || optind != argc) {
-		error("Syntax: %s [ -m ] -n <node_id> -i <iface>", argv[0]);
+		error("Syntax: %s [ -m | -M ] -n <node_id> -i <iface>", argv[0]);
 		return 1;
 	}
 
@@ -67,7 +71,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	if (set_stdin_char_mode(true) < 0) {
+	if (set_stdin_char_mode(true, signals) < 0) {
 		callfail("set_stdin_char_mode");
 		return 1;
 	}
@@ -76,6 +80,7 @@ int main(int argc, char *argv[])
 	sigemptyset(&ss);
 	sigaddset(&ss, SIGTERM);
 	sigaddset(&ss, SIGINT);
+	sigaddset(&ss, SIGQUIT);
 
 	const int sfd = signalfd(-1, &ss, 0);
 
@@ -131,7 +136,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	set_stdin_char_mode(false);
+	set_stdin_char_mode(false, true);
 
 	close(fd);
 
