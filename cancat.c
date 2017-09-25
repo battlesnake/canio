@@ -71,6 +71,10 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
+	if (!signals) {
+		warn("Signal translation disabled - to terminate cancat send SIGTERM from another program, e.g. bash: kill %d", (int) getpid());
+	}
+
 	if (set_stdin_char_mode(true, signals) < 0) {
 		callfail("set_stdin_char_mode");
 		return 1;
