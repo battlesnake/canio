@@ -1,3 +1,5 @@
+#if defined __linux__
+
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
@@ -12,9 +14,11 @@
 #include <linux/can.h>
 #include <linux/can/raw.h>
 
+#include "log.h"
+
 #include "canio.h"
 
-int can_socket(const char *iface, int node_id, bool master)
+int canio_socket(const char *iface, int node_id, bool master)
 {
 	int fd = socket(PF_CAN, SOCK_RAW, CAN_RAW);
 	if (fd < 0) {
@@ -46,7 +50,7 @@ int can_socket(const char *iface, int node_id, bool master)
 	return fd;
 }
 
-ssize_t can_write(int fd, uint32_t id, const char *buf, size_t length)
+ssize_t canio_write(int fd, uint32_t id, const char *buf, size_t length)
 {
 	if (length > CAN_MTU) {
 		return -1;
@@ -63,7 +67,7 @@ ssize_t can_write(int fd, uint32_t id, const char *buf, size_t length)
 	return ret;
 }
 
-ssize_t can_read(int fd, uint32_t *id, char *buf, size_t bufsize)
+ssize_t canio_read(int fd, uint32_t *id, char *buf, size_t bufsize)
 {
 	struct can_frame fr;
 	int ret = read(fd, &fr, sizeof(fr));
@@ -81,3 +85,5 @@ ssize_t can_read(int fd, uint32_t *id, char *buf, size_t bufsize)
 	memcpy(buf, fr.data, fr.can_dlc);
 	return fr.can_dlc;
 }
+
+#endif

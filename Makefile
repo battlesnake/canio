@@ -7,7 +7,7 @@ all: $(progs)
 clean:
 	rm -f -- $(progs) *.o
 
-$(progs): %: %.o canio.o
+$(progs): %: %.o canio.o terminal.o
 	$(CC) $(CFLAGS) -o $@ $^ -lutil
 
 %.o: %.c $(wildcard *.h)

@@ -14,34 +14,10 @@
 
 #include <sys/signalfd.h>
 
-#include "canio.h"
+#include "log.h"
+#include "terminal.h"
 
-int set_stdin_char_mode(bool enable, bool signals)
-{
-	static struct termios old;
-	static bool first = true;
-	if (first) {
-		if (tcgetattr(STDIN_FILENO, &old) < 0) {
-			sysfail("tcgetattr");
-			return -1;
-		}
-		first = false;
-	}
-	struct termios now = old;
-	if (enable) {
-		now.c_lflag &= ~(ICANON | ECHO | ECHOCTL | ISIG);
-		if (signals) {
-			now.c_lflag |= ISIG;
-		}
-		now.c_cc[VMIN] = 1;
-		now.c_cc[VTIME] = 2;
-	}
-	if (tcsetattr(STDIN_FILENO, TCSANOW, &now) < 0) {
-		sysfail("tcsetattr");
-		return -1;
-	}
-	return 0;
-}
+#include "canio.h"
 
 int main(int argc, char *argv[])
 {
@@ -65,9 +41,9 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	int fd = can_socket(iface, node_id, master);
+	int fd = canio_socket(iface, node_id, master);
 	if (fd < 0) {
-		callfail("can_socket");
+		callfail("canio_socket");
 		return 1;
 	}
 
@@ -75,8 +51,8 @@ int main(int argc, char *argv[])
 		warn("Signal translation disabled - to terminate cancat send SIGTERM from another program, e.g. bash: kill %d", (int) getpid());
 	}
 
-	if (set_stdin_char_mode(true, signals) < 0) {
-		callfail("set_stdin_char_mode");
+	if (termios_stdin_char_mode(signals) < 0) {
+		callfail("termios_stdin_char_mode");
 		return 1;
 	}
 
@@ -120,8 +96,8 @@ int main(int argc, char *argv[])
 				sysfail("read");
 				break;
 			}
-			if (can_write(fd, master ? CANIO_STDIN(node_id) : CANIO_STDOUT(node_id), &c, sizeof(c)) < 0) {
-				callfail("can_write");
+			if (canio_write(fd, master ? CANIO_STDIN(node_id) : CANIO_STDOUT(node_id), &c, sizeof(c)) < 0) {
+				callfail("canio_write");
 				break;
 			}
 		}
@@ -129,8 +105,8 @@ int main(int argc, char *argv[])
 			char buf[8];
 			uint32_t id;
 			ssize_t len;
-			if ((len = can_read(fd, &id, buf, sizeof(buf))) < 0) {
-				callfail("can_read");
+			if ((len = canio_read(fd, &id, buf, sizeof(buf))) < 0) {
+				callfail("canio_read");
 				break;
 			}
 			if (write(STDOUT_FILENO, buf, len) != len) {
@@ -140,7 +116,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	set_stdin_char_mode(false, true);
+	termios_reset();
 
 	close(fd);
 

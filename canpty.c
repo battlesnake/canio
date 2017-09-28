@@ -18,36 +18,14 @@
 #include <sys/signalfd.h>
 #include <sys/wait.h>
 
+#include "log.h"
+#include "terminal.h"
+
 #include "canio.h"
 
 int max3(int a, int b, int c)
 {
 	return a > b ? a > c ? a : c : b > c ? b : c;
-}
-
-int set_stdin_no_echo(bool enable)
-{
-	static struct termios old;
-	static bool first = true;
-	if (first) {
-		if (tcgetattr(STDIN_FILENO, &old) < 0) {
-			sysfail("tcgetattr");
-			return -1;
-		}
-		first = false;
-	}
-	struct termios now = old;
-	if (enable) {
-		now.c_lflag &= ~(ICANON | ECHO | ECHONL | ECHOCTL);
-		now.c_lflag |= ISIG;
-		now.c_cc[VMIN] = 1;
-		now.c_cc[VTIME] = 2;
-	}
-	if (tcsetattr(STDIN_FILENO, TCSANOW, &now) < 0) {
-		sysfail("tcsetattr");
-		return -1;
-	}
-	return 0;
 }
 
 int main(int argc, char *argv[])
@@ -70,9 +48,9 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	int fd = can_socket(iface, node_id, master);
+	int fd = canio_socket(iface, node_id, master);
 	if (fd < 0) {
-		callfail("can_socket");
+		callfail("canio_socket");
 		return 1;
 	}
 
@@ -106,7 +84,11 @@ int main(int argc, char *argv[])
 
 	info("Launched program with pid=%d", (int) pid);
 
-	set_stdin_no_echo(true);
+	if (termios_stdin_no_echo() < 0) {
+		callfail("termios_stdin_no_echo");
+		kill(pid, SIGTERM);
+		return 1;
+	}
 
 	bool end = false;
 	bool sigchld = false;
@@ -138,8 +120,8 @@ int main(int argc, char *argv[])
 				sysfail("read");
 				break;
 			}
-			if (len > 0 && can_write(fd, master ? CANIO_STDIN(node_id) : CANIO_STDOUT(node_id), buf, len) < 0) {
-				callfail("can_write");
+			if (len > 0 && canio_write(fd, master ? CANIO_STDIN(node_id) : CANIO_STDOUT(node_id), buf, len) < 0) {
+				callfail("canio_write");
 				break;
 			}
 		}
@@ -147,8 +129,8 @@ int main(int argc, char *argv[])
 			char buf[8];
 			uint32_t id;
 			ssize_t len;
-			if ((len = can_read(fd, &id, buf, sizeof(buf))) < 0) {
-				callfail("can_read");
+			if ((len = canio_read(fd, &id, buf, sizeof(buf))) < 0) {
+				callfail("canio_read");
 				break;
 			}
 			if (write(mpty, buf, len) != len) {
@@ -158,7 +140,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	set_stdin_no_echo(false);
+	termios_reset();
 
 	if (!sigchld) {
 		kill(pid, SIGTERM);
