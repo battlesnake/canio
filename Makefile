@@ -23,3 +23,7 @@ virtual:
 	modprobe vcan
 	ip link add dev can0 type vcan
 	ip link set dev can0 up
+
+.PHONY: install
+install: $(progs)
+	cp -t /usr/bin $^
