@@ -120,7 +120,7 @@ int main(int argc, char *argv[])
 				sysfail("read");
 				break;
 			}
-			if (can_write(fd, master ? CAN_ID_STDIN(node_id) : CAN_ID_STDOUT(node_id), &c, sizeof(c)) < 0) {
+			if (can_write(fd, master ? CANIO_STDIN(node_id) : CANIO_STDOUT(node_id), &c, sizeof(c)) < 0) {
 				callfail("can_write");
 				break;
 			}

@@ -31,8 +31,8 @@ int can_socket(const char *iface, int node_id, bool master)
 	}
 	struct can_filter cf;
 	memset(&cf, 0, sizeof(cf));
-	cf.can_id = master ? CAN_ID_STDOUT_FD : CAN_ID_STDIN(node_id);
-	cf.can_mask = master ? CAN_ID_FD_MASK : CAN_EFF_MASK;
+	cf.can_id = master ? CANIO_ALL(node_id) : CANIO_STDIN(node_id);
+	cf.can_mask = master ? CANIO_NODE_MASK : CANIO_NODE_STREAM_MASK;
 	if (setsockopt(fd, SOL_CAN_RAW, CAN_RAW_FILTER, &cf, sizeof(cf)) < -1) {
 		sysfail("setsockopt:CAN_RAW_FILTER");
 		close(fd);

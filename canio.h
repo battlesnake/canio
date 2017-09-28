@@ -2,14 +2,27 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <errno.h>
+#include <linux/can.h>
 
-#define CAN_ID_FD_MASK 0x00000F00U
-#define CAN_ID_STDIN_FD 0x00000000U
-#define CAN_ID_STDOUT_FD 0x00000100U
+#define CANIO_NODE_ALL 0xFFU
+#define CANIO_STREAM_ALL 0xFU
 
-#define CAN_ID_NODE_MASK 0x000000FFU
-#define CAN_ID_STDOUT(node) (0x00000100U | ((node) & CAN_ID_NODE_MASK))
-#define CAN_ID_STDIN(node) (0x00000000U | ((node) & CAN_ID_NODE_MASK))
+/* Make ID */
+#define CANIO_ID(node, stream) ((canid_t) (((node) & CANIO_NODE_ALL) | ((stream) & CANIO_STREAM_ALL) << 8))
+/* Deconstruct ID */
+#define CANIO_NODE(id) ((id) & 0xFFU)
+#define CANIO_STREAM(id) ((id) >> 8 & 0xFU)
+
+/* Masks */
+#define CANIO_NODE_MASK CANIO_ID(CANIO_NODE_ALL, 0)
+#define CANIO_STREAM_MASK CANIO_ID(0, CANIO_STREAM_ALL)
+#define CANIO_NODE_STREAM_MASK CANIO_ID(CANIO_NODE_ALL, CANIO_STREAM_ALL)
+
+/* Node/stream CAN ID generators */
+#define CANIO_STDOUT(node) CANIO_ID(node, 1)
+#define CANIO_STDIN(node) CANIO_ID(node, 0)
+#define CANIO_ALL(node) CANIO_ID(node, CANIO_STREAM_ALL)
+
 #define CAN_DATA_LEN 8
 
 #define log(fmt, ...) fprintf(stderr, "%-8.8s:%4d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__)
