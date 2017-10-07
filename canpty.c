@@ -23,7 +23,7 @@
 
 #include "canio.h"
 
-int max3(int a, int b, int c)
+static int max3(int a, int b, int c)
 {
 	return a > b ? a > c ? a : c : b > c ? b : c;
 }
@@ -155,6 +155,7 @@ int main(int argc, char *argv[])
 	waitpid(pid, &ret, 0);
 	close(mpty);
 
+	close(sfd);
 	close(fd);
 
 	if (WIFEXITED(ret)) {

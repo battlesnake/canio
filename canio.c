@@ -7,6 +7,7 @@
 #include <stdbool.h>
 
 #include <unistd.h>
+#include <poll.h>
 
 #include <net/if.h>
 #include <sys/ioctl.h>
@@ -56,15 +57,34 @@ int canio_socket(const char *iface, int node_id, int node_fd)
 
 ssize_t canio_write(int fd, uint32_t id, const void *buf, size_t length)
 {
+	return canio_write_for(fd, id, buf, length, -1);
+}
+
+ssize_t canio_write_for(int fd, uint32_t id, const void *buf, size_t length, canio_timeout_t timeout)
+{
+	int ret;
+	struct pollfd pfd = { .fd = fd, .events = POLLOUT };
+	ret = poll(&pfd, 1, timeout);
+	if (ret == 0) {
+		errno = ETIMEDOUT;
+		return -1;
+	}
+	if (ret < 0) {
+		sysfail("poll");
+		return -1;
+	}
+	ret = 0;
 	if (length > CAN_MTU) {
+		errno = EOVERFLOW;
 		return -1;
 	}
 	struct can_frame fr;
+	memset(&fr, 0, sizeof(fr));
 	fr.can_id = id;
 	memcpy(fr.data, buf, length);
 	fr.can_dlc = length;
-	int ret = write(fd, &fr, sizeof(fr));
-	if (ret == -1) {
+	ret = write(fd, &fr, sizeof(fr));
+	if (ret < 0) {
 		sysfail("write");
 		return -1;
 	}
@@ -73,13 +93,36 @@ ssize_t canio_write(int fd, uint32_t id, const void *buf, size_t length)
 
 ssize_t canio_read(int fd, uint32_t *id, void *buf, size_t bufsize)
 {
+	return canio_read_for(fd, id, buf, bufsize, -1);
+}
+
+ssize_t canio_read_for(int fd, uint32_t *id, void *buf, size_t bufsize, canio_timeout_t timeout)
+{
+	int ret;
+	struct pollfd pfd = { .fd = fd, .events = POLLIN };
+	ret = poll(&pfd, 1, timeout);
+	if (ret == 0) {
+		errno = ETIMEDOUT;
+		return -1;
+	}
+	if (ret < 0) {
+		sysfail("poll");
+		return -1;
+	}
+	ret = 0;
 	struct can_frame fr;
-	int ret = read(fd, &fr, sizeof(fr));
+	ret = read(fd, &fr, sizeof(fr));
+	if (ret < 0) {
+		sysfail("read");
+		return -1;
+	}
 	if (ret != sizeof(fr)) {
+		errno = EINVAL;
 		sysfail("read");
 		return -1;
 	}
 	if (fr.can_dlc > bufsize) {
+		errno = EMSGSIZE;
 		error("CAN payload is larger than receive buffer");
 		return -1;
 	}

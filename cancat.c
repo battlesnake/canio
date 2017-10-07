@@ -118,6 +118,7 @@ int main(int argc, char *argv[])
 
 	termios_reset();
 
+	close(sfd);
 	close(fd);
 
 	if (write(STDOUT_FILENO, "\n", 1)) { }
