@@ -48,7 +48,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	int fd = canio_socket(iface, node_id, master);
+	int fd = canio_socket(iface, node_id, master ? 1 : 0);
 	if (fd < 0) {
 		callfail("canio_socket");
 		return 1;

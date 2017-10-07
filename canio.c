@@ -18,8 +18,11 @@
 
 #include "canio.h"
 
-int canio_socket(const char *iface, int node_id, bool master)
+int canio_socket(const char *iface, int node_id, int node_fd)
 {
+	if (node_fd < -1 || node_fd > 255 || node_id < 0 || node_id > 255) {
+		return -EINVAL;
+	}
 	int fd = socket(PF_CAN, SOCK_RAW, CAN_RAW);
 	if (fd < 0) {
 		sysfail("socket");
@@ -35,8 +38,9 @@ int canio_socket(const char *iface, int node_id, bool master)
 	}
 	struct can_filter cf;
 	memset(&cf, 0, sizeof(cf));
-	cf.can_id = master ? CANIO_ALL(node_id) : CANIO_STDIN(node_id);
-	cf.can_mask = master ? CANIO_NODE_MASK : CANIO_NODE_STREAM_MASK;
+	bool wildcard = node_fd == -1;
+	cf.can_id = wildcard ? CANIO_ALL(node_id) : CANIO_ID(node_id, node_fd);
+	cf.can_mask = wildcard ? CANIO_NODE_MASK : CANIO_NODE_STREAM_MASK;
 	if (setsockopt(fd, SOL_CAN_RAW, CAN_RAW_FILTER, &cf, sizeof(cf)) < -1) {
 		sysfail("setsockopt:CAN_RAW_FILTER");
 		close(fd);
@@ -50,7 +54,7 @@ int canio_socket(const char *iface, int node_id, bool master)
 	return fd;
 }
 
-ssize_t canio_write(int fd, uint32_t id, const char *buf, size_t length)
+ssize_t canio_write(int fd, uint32_t id, const void *buf, size_t length)
 {
 	if (length > CAN_MTU) {
 		return -1;
@@ -67,7 +71,7 @@ ssize_t canio_write(int fd, uint32_t id, const char *buf, size_t length)
 	return ret;
 }
 
-ssize_t canio_read(int fd, uint32_t *id, char *buf, size_t bufsize)
+ssize_t canio_read(int fd, uint32_t *id, void *buf, size_t bufsize)
 {
 	struct can_frame fr;
 	int ret = read(fd, &fr, sizeof(fr));
@@ -84,6 +88,11 @@ ssize_t canio_read(int fd, uint32_t *id, char *buf, size_t bufsize)
 	}
 	memcpy(buf, fr.data, fr.can_dlc);
 	return fr.can_dlc;
+}
+
+int canio_close(int fd)
+{
+	return close(fd);
 }
 
 #endif
