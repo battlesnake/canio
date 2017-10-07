@@ -14,9 +14,6 @@ enum args_char_action args_char(struct arg_builder *args, char c)
 			args->argl = 0;
 			args->argc++;
 		}
-		if (args->argc == 0 && args->argl == 0) {
-			return aca_continue;
-		}
 		return aca_run;
 	} else if (c < 32) {
 		error("Invalid character: 0x%02hhx", c);

@@ -25,12 +25,21 @@
 
 #define TIMEOUT 1000
 
+canio_timeout_t get_timeout(const struct arg_builder *args)
+{
+	if (args->argc == 2) {
+		return strtoull(args->args[1], NULL, 10);
+	} else {
+		return 0;
+	}
+}
+
 CLI_COMMAND_HANDLER(do_ident)
 {
 	(void) args;
 	struct cansys_client *client = ctx;
 	char name[8];
-	if (cansys_client_ident(client, name, sizeof(name), 0)) {
+	if (cansys_client_ident(client, name, sizeof(name), get_timeout(args))) {
 		error("%s", strerror(errno));
 		return ccr_fail;
 	}
@@ -41,7 +50,7 @@ CLI_COMMAND_HANDLER(do_ident)
 CLI_COMMAND_HANDLER(do_ping)
 {
 	struct cansys_client *client = ctx;
-	if (cansys_client_ping(client, 0)) {
+	if (cansys_client_ping(client, get_timeout(args))) {
 		error("%s", strerror(errno));
 		return ccr_fail;
 	}
@@ -62,7 +71,7 @@ CLI_COMMAND_HANDLER(do_set_heartbeat)
 CLI_COMMAND_HANDLER(do_reboot)
 {
 	struct cansys_client *client = ctx;
-	if (cansys_client_reboot(client, 0)) {
+	if (cansys_client_reboot(client, get_timeout(args))) {
 		error("%s", strerror(errno));
 		return ccr_fail;
 	}
@@ -73,7 +82,7 @@ CLI_COMMAND_HANDLER(do_uptime)
 {
 	struct cansys_client *client = ctx;
 	uint64_t value;
-	if (cansys_client_uptime(client, &value, 0)) {
+	if (cansys_client_uptime(client, &value, get_timeout(args))) {
 		error("%s", strerror(errno));
 		return ccr_fail;
 	}
@@ -106,44 +115,98 @@ CLI_COMMAND_HANDLER(do_reg)
 	return ccr_success;
 }
 
-struct cli_command cmds[] = {
+static const struct cli_command cmds[];
+
+CLI_COMMAND_HANDLER(do_help)
+{
+	(void) ctx;
+	const struct cli_command *cmd = cmds;
+	size_t ncmd = (size_t) -1;
+	if (args->argc == 2) {
+		const char *cmd_name = args->args[1];
+		cmd = find_command(cmds, -1, cmd_name);
+		if (!cmd) {
+			error("Command not found: '%s'", cmd_name);
+		}
+		ncmd = 1;
+	}
+	info("HELP");
+	info("====");
+	for (; ncmd && cmd->command; ncmd--, cmd++) {
+		info("\x1b[0mCommand: %s", cmd->command);
+		info("\x1b[0mSyntax: %s", cmd->syntax);
+		info("\x1b[0mDescription: %s", cmd->description);
+		info("\x1b[0mArgument count: %zu-%zu", cmd->min_args, cmd->max_args);
+		info("");
+	}
+	return ccr_success;
+}
+
+static const struct cli_command cmds[] = {
+	{
+		.command = "help",
+		.syntax = "help [command]",
+		.description = "Get help for command-line interface",
+		.min_args = 1,
+		.max_args = 2,
+		.handler = do_help
+	},
 	{
 		.command = "ident",
+		.syntax = "ident [timeout]",
+		.description = "Get identity of remote node",
 		.min_args = 1,
-		.max_args = 1,
+		.max_args = 2,
 		.handler = do_ident
 	},
 	{
 		.command = "ping",
+		.syntax = "ping [timeout]",
+		.description = "Ping remote node",
 		.min_args = 1,
-		.max_args = 1,
+		.max_args = 2,
 		.handler = do_ping
 	},
 	{
 		.command = "heartbeat",
+		.syntax = "heartbeat <interval-ms>",
+		.description = "Change heartbeat interval of remote node (0 to disable)",
 		.min_args = 2,
 		.max_args = 2,
 		.handler = do_set_heartbeat
 	},
 	{
 		.command = "reboot",
+		.syntax = "reboot [timeout]",
+		.description = "Reboot remote node",
 		.min_args = 1,
-		.max_args = 1,
+		.max_args = 2,
 		.handler = do_reboot
 	},
 	{
 		.command = "uptime",
+		.syntax = "uptime [timeout]",
+		.description = "Get uptime of remote node",
 		.min_args = 1,
-		.max_args = 1,
+		.max_args = 2,
 		.handler = do_uptime
 	},
 	{
 		.command = "reg",
+		.syntax = "reg <register> [<value>]",
+		.description = "Read or write a register on the remote node",
 		.min_args = 2,
 		.max_args = 3,
 		.handler = do_reg
 	},
+	{ }
 };
+
+void args_next_line(struct arg_builder *args)
+{
+	if (write(STDOUT_FILENO, "$ ", 2)) { }
+	args_reset(args);
+}
 
 int main(int argc, char *argv[])
 {
@@ -189,11 +252,9 @@ int main(int argc, char *argv[])
 	}
 
 	struct arg_builder args;
-	args_reset(&args);
+	args_next_line(&args);
 
 	bool end = false;
-
-	if (write(STDOUT_FILENO, "$ ", 2)) { }
 
 	while (true) {
 		enum fds {
@@ -222,16 +283,20 @@ int main(int argc, char *argv[])
 			}
 			enum args_char_action ret = args_char(&args, c);
 			if (ret == aca_error) {
-				break;
+				args_next_line(&args);
+				continue;
 			}
 			if (ret == aca_run) {
-				switch (args_execute(&args, &client, cmds, sizeof(cmds) / sizeof(cmds[0]))) {
+				if (args.argc == 0 && args.argl == 0) {
+					args_next_line(&args);
+					continue;
+				}
+				switch (args_execute(&args, &client, cmds, -1)) {
 				case ccr_syntax: error("Syntax error"); break;
 				case ccr_fail: error("Command failed"); break;
 				case ccr_success: info("Success"); break;
 				}
-				args_reset(&args);
-				if (write(STDOUT_FILENO, "$ ", 2)) { }
+				args_next_line(&args);
 				continue;
 			}
 		}
