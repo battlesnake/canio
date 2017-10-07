@@ -86,8 +86,7 @@ int main(int argc, char *argv[])
 
 	if (termios_stdin_no_echo() < 0) {
 		callfail("termios_stdin_no_echo");
-		kill(pid, SIGTERM);
-		return 1;
+		warn("Failed to disable echo on terminal.  This should not affect operations.");
 	}
 
 	bool end = false;
