@@ -10,7 +10,7 @@
 #define cansys_printx(...)
 //#define cansys_printx cansys_printx_real
 
-static void cansys_printx_real(const char *name, const void *buf, size_t len)
+static __attribute__((unused)) void cansys_printx_real(const char *name, const void *buf, size_t len)
 {
 	/* TODO remove/disable */
 	const char *p = buf;
@@ -21,7 +21,7 @@ static void cansys_printx_real(const char *name, const void *buf, size_t len)
 	printf("\n");
 }
 
-static uint64_t get_raw64(const void *buf, size_t buflen)
+static __attribute__((unused)) uint64_t get_raw64(const void *buf, size_t buflen)
 {
 	uint64_t raw = 0;
 	if (buflen > sizeof(raw)) {
@@ -31,7 +31,7 @@ static uint64_t get_raw64(const void *buf, size_t buflen)
 	return le64toh(raw);
 }
 
-static ssize_t set_raw64(void *buf, size_t buflen, uint64_t val)
+static __attribute__((unused)) ssize_t set_raw64(void *buf, size_t buflen, uint64_t val)
 {
 	uint64_t raw = htole64(val);
 	const uint8_t *raw_b = (void *) &raw;
@@ -50,12 +50,12 @@ static ssize_t set_raw64(void *buf, size_t buflen, uint64_t val)
 	return retlen;
 }
 
-static uint64_t get_val64(const struct cansys_data *buf, size_t datalen)
+static __attribute__((unused)) uint64_t get_val64(const struct cansys_data *buf, size_t datalen)
 {
 	return get_raw64(buf->data, datalen);
 }
 
-static ssize_t set_val64(struct cansys_data *buf, uint64_t val)
+static __attribute__((unused)) ssize_t set_val64(struct cansys_data *buf, uint64_t val)
 {
 	return set_raw64(buf->data, sizeof(buf->data), val);
 }

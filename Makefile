@@ -1,14 +1,17 @@
 cansys_demo = cansys_server_demo cansys_client_demo
 progs = cancat canpty $(cansys_demo)
 
+CFLAGS := -O2 -march=native -mtune=native -Wall -Wextra -Wno-parentheses -Werror -std=gnu11 -flto -fdata-sections -ffunction-sections -Wl,--gc-sections -pipe
+
 .PHONY: all
 all: $(progs)
+	size -d $(progs)
 
 .PHONY: clean
 clean:
 	rm -f -- $(progs) *.o
 
-$(progs): %: %.o canio.o terminal.o
+$(progs): %: %.o canio.o terminal.o reactor.o
 	$(CC) $(CFLAGS) -o $@ $^ -lutil
 
 $(cansys_demo): cansys_%_demo: cansys_%.o args.o

@@ -19,65 +19,82 @@
 
 #include "log.h"
 #include "terminal.h"
+#include "reactor.h"
 
 #include "canio.h"
 
 #include "cansys.h"
 
-static int max3(int a, int b, int c)
-{
-	return a > b ? a > c ? a : c : b > c ? b : c;
-}
-
 #define NREGS 10
 
-struct server_state
+struct program_state
 {
+	struct reactor reactor;
+
+	struct cansys_server server;
+	uint32_t can_id;
+
 	struct timespec boottime;
 	uint64_t regs[NREGS];
-	int tfd;
+
+	int can_fd;
+	int signal_fd;
+	int heartbeat_fd;
 };
+
+static int set_heartbeat_interval(const struct program_state *state, uint64_t ms)
+{
+	struct itimerspec ts;
+	ts.it_value.tv_nsec = ms ? 1 : 0;
+	ts.it_value.tv_sec = 0;
+	uint64_t ns = ms * 1000000;
+	ts.it_interval.tv_nsec = ns % 1000000000;
+	ts.it_interval.tv_sec = ns / 1000000000;
+	if (timerfd_settime(state->heartbeat_fd, 0, &ts, NULL) < 0) {
+		sysfail("timerfd_settime");
+		return -1;
+	}
+	return 0;
+}
 
 static int do_set_heartbeat_ms(void *arg, uint64_t *ms)
 {
-	const struct server_state *ss = arg;
-	struct itimerspec ts;
-	if (*ms > 60000) {
+	const struct program_state *state = arg;
+	if (*ms != 0 && *ms < 100) {
+		*ms = 100;
+	} else if (*ms > 60000) {
 		*ms = 60000;
 	}
-	ts.it_value.tv_nsec = 1;
-	ts.it_value.tv_sec = 0;
-	uint64_t ns = *ms * 1000000;
-	ts.it_interval.tv_nsec = ns % 1000000000;
-	ts.it_interval.tv_sec = ns / 1000000000;
-	if (timerfd_settime(ss->tfd, 0, &ts, NULL) < 0) {
+	if (set_heartbeat_interval(state, *ms)) {
+		callfail("set_heartbeat_interval");
 		return -1;
 	}
-	info("Heartbeat interval changed to %lums", *ms);
+	info("Heartbeat interval changed to %lums", ms ? *ms : 0);
 	return 0;
 }
 
 static int do_reboot(void *arg)
 {
-	struct server_state *ss = arg;
+	struct program_state *state = arg;
 	info("Mock reboot");
-	return clock_gettime(CLOCK_BOOTTIME, &ss->boottime);
+	set_heartbeat_interval(arg, 0);
+	return clock_gettime(CLOCK_BOOTTIME, &state->boottime);
 }
 
 static int do_uptime_ms(void *arg, uint64_t *out)
 {
-	const struct server_state *ss = arg;
+	const struct program_state *state = arg;
 	info("Mock uptime");
 	struct timespec ts;
 	if (clock_gettime(CLOCK_BOOTTIME, &ts) != 0) {
 		return -1;
 	}
-	if (ts.tv_nsec < ss->boottime.tv_nsec) {
+	if (ts.tv_nsec < state->boottime.tv_nsec) {
 		ts.tv_sec--;
 		ts.tv_nsec += 1000000000;
 	}
-	ts.tv_sec -= ss->boottime.tv_sec;
-	ts.tv_nsec -= ss->boottime.tv_nsec;
+	ts.tv_sec -= state->boottime.tv_sec;
+	ts.tv_nsec -= state->boottime.tv_nsec;
 	*out = ts.tv_nsec / 1000000 + ts.tv_sec * 1000;
 	return 0;
 }
@@ -85,22 +102,22 @@ static int do_uptime_ms(void *arg, uint64_t *out)
 static int do_reg_read(void *arg, uint16_t reg, uint64_t *value)
 {
 	info("Mock reg read %hu", reg);
-	const struct server_state *ss = arg;
+	const struct program_state *state = arg;
 	if (reg >= NREGS) {
 		return -ENOENT;
 	}
-	*value = ss->regs[reg];
+	*value = state->regs[reg];
 	return 0;
 }
 
 static int do_reg_write(void *arg, uint16_t reg, uint64_t *value)
 {
 	info("Mock reg write %hu <- %ld (%016lx)", reg, *value, *value);
-	struct server_state *ss = arg;
+	struct program_state *state = arg;
 	if (reg >= NREGS) {
 		return -ENOENT;
 	}
-	ss->regs[reg] = *value;
+	state->regs[reg] = *value;
 	return 0;
 }
 
@@ -112,8 +129,98 @@ static struct cansys_adapter adapter = {
 	.reg_write = do_reg_write
 };
 
+REACTOR_REACTION(on_can)
+{
+	struct program_state *state = ctx;
+	uint32_t id;
+	struct cansys_data msg;
+	ssize_t ret;
+	if ((ret = canio_read(fd, &id, &msg, sizeof(msg))) < 0) {
+		error("canio_read failed: %s", strerror(errno));
+		return -1;
+	}
+	size_t len = ret;
+	if (cansys_server_handle_message(&state->server, &msg, &len)) {
+		callfail("cansys_server_handle_message");
+	}
+	if (canio_write(fd, state->can_id, &msg, len) < 0) {
+		error("canio_write failed: %s", strerror(errno));
+		return -1;
+	}
+	return 0;
+}
+
+REACTOR_REACTION(on_signal)
+{
+	info("signal");
+	reactor_end(reactor, 0);
+	return 0;
+}
+
+REACTOR_REACTION(on_heartbeat)
+{
+	struct program_state *state = ctx;
+	uint64_t hits;
+	if (read(state->heartbeat_fd, &hits, sizeof(hits)) < 0) {
+		sysfail("read");
+		return -1;
+	}
+	struct cansys_data msg;
+	size_t len;
+	if (cansys_server_make_heartbeat(&state->server, &msg, &len) < 0) {
+		callfail("cansys_server_make_heartbeat");
+		return -1;
+	}
+	if (canio_write(state->can_fd, state->can_id, &msg, len) < 0) {
+		error("canio_write failed: %s", strerror(errno));
+		return -1;
+	}
+	info("Heartbeat sent");
+	return 0;
+}
+
+int run_loop(struct program_state *state)
+{
+	int ret = 0;
+
+	if (reactor_init(&state->reactor, 3, state)) {
+		callfail("reactor_init");
+		return -1;
+	}
+
+	if (reactor_bind(&state->reactor, state->signal_fd, NULL, on_signal, NULL, NULL)) {
+		callfail("reactor_bind");
+		goto fail;
+	}
+
+	if (reactor_bind(&state->reactor, state->heartbeat_fd, NULL, on_heartbeat, NULL, NULL)) {
+		callfail("reactor_bind");
+		goto fail;
+	}
+
+	if (reactor_bind(&state->reactor, state->can_fd, NULL, on_can, NULL, NULL)) {
+		callfail("reactor_bind");
+		goto fail;
+	}
+
+	if (reactor_loop(&state->reactor, &ret)) {
+		callfail("reactor_loop");
+		goto fail;
+	}
+
+	goto done;
+fail:
+	ret = -1;
+
+done:
+	reactor_free(&state->reactor);
+	return ret;
+}
+
 int main(int argc, char *argv[])
 {
+	int ret = -1;
+
 	int node_id = -1;
 	const char *iface = NULL;
 
@@ -131,8 +238,15 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	int fd = canio_socket(iface, node_id, false);
-	if (fd < 0) {
+	struct program_state state;
+	memset(&state, 0, sizeof(state));
+
+	state.can_fd = -1;
+	state.signal_fd = -1;
+	state.heartbeat_fd = -1;
+
+	state.can_fd = canio_socket(iface, node_id, false);
+	if (state.can_fd < 0) {
 		callfail("canio_socket");
 		return 1;
 	}
@@ -143,108 +257,54 @@ int main(int argc, char *argv[])
 	sigaddset(&ss, SIGINT);
 	sigaddset(&ss, SIGQUIT);
 
-	const int sfd = signalfd(-1, &ss, 0);
+	state.signal_fd = signalfd(-1, &ss, 0);
 
-	if (sfd < 0) {
+	if (state.signal_fd < 0) {
 		sysfail("signalfd");
-		return 1;
+		goto done;
 	}
 
 	if (sigprocmask(SIG_BLOCK, &ss, NULL) < 0) {
 		sysfail("sigprocmask");
-		return 1;
+		goto done;
 	}
 
-	const int tfd = timerfd_create(CLOCK_MONOTONIC, 0);
+	state.heartbeat_fd = timerfd_create(CLOCK_MONOTONIC, 0);
 
-	if (tfd < 0) {
+	if (state.heartbeat_fd < 0) {
 		sysfail("timerfd");
-		return 1;
+		goto done;
 	}
 
-	struct server_state state;
-	memset(&state, 0, sizeof(state));
-	state.tfd = tfd;
 	if (clock_gettime(CLOCK_BOOTTIME, &state.boottime) < 0) {
 		sysfail("clock_gettime");
-		return 1;
+		goto done;
 	}
 
-	struct cansys_server server;
-	if (cansys_server_init(&server, &adapter, ident, &state)) {
+	if (cansys_server_init(&state.server, &adapter, ident, &state)) {
 		callfail("cansys_server_init");
-		return 1;
+		goto done;
 	}
 
 	if (termios_stdin_no_echo() < 0) {
 		callfail("termios_stdin_no_echo");
 	}
 
-	bool end = false;
+	state.can_id = CANIO_ID(node_id, CANSYS_CMD_FD);
 
-	while (true) {
-		enum fds {
-			fd_can,
-			fd_signal,
-			fd_timer
-		};
-		struct pollfd pfd[] = {
-			[fd_can] = { .fd = fd, .events = POLLIN },
-			[fd_signal] = { .fd = sfd, .events = POLLIN },
-			[fd_timer] = { .fd = tfd, .events = POLLIN },
-		};
-		if (poll(pfd, sizeof(pfd) / sizeof(pfd[0]), -1) < 0) {
-			sysfail("pselect");
-			break;
-		}
-		if (pfd[fd_signal].revents) {
-			end = true;
-			break;
-		}
-		if (pfd[fd_timer].revents) {
-			uint64_t hits;
-			if (read(tfd, &hits, sizeof(hits)) < 0) {
-				sysfail("read");
-				break;
-			}
-			struct cansys_data msg;
-			size_t len;
-			if (cansys_server_make_heartbeat(&server, &msg, &len) < 0) {
-				callfail("cansys_server_make_heartbeat");
-				break;
-			}
-			if (canio_write(fd, CANIO_ID(node_id, CANSYS_CMD_FD), &msg, len) < 0) {
-				error("canio_write failed: %s", strerror(errno));
-				break;
-			}
-			info("Heartbeat sent");
-		}
-		if (pfd[fd_can].revents) {
-			uint32_t id;
-			struct cansys_data msg;
-			ssize_t ret;
-			if ((ret = canio_read(fd, &id, &msg, sizeof(msg))) < 0) {
-				error("canio_read failed: %s", strerror(errno));
-				break;
-			}
-			size_t len = ret;
-			if (cansys_server_handle_message(&server, &msg, &len)) {
-				callfail("cansys_server_handle_message");
-			}
-			if (canio_write(fd, CANIO_ID(node_id, CANSYS_CMD_FD), &msg, len) < 0) {
-				error("canio_write failed: %s", strerror(errno));
-				break;
-			}
-		}
-	}
+	ret = run_loop(&state);
+
+done:
 
 	termios_reset();
 
-	cansys_server_free(&server);
+	cansys_server_free(&state.server);
 
-	close(tfd);
-	close(sfd);
-	close(fd);
+	close(state.heartbeat_fd);
+	close(state.signal_fd);
+	close(state.can_fd);
 
-	return end ? 0 : 1;
+	if (write(STDOUT_FILENO, "\n", 1)) { }
+
+	return ret;
 }

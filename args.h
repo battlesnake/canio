@@ -31,9 +31,10 @@ enum cli_command_result
 	ccr_fail
 };
 
-#define CLI_COMMAND_HANDLER(name) enum cli_command_result name (const struct arg_builder *args, void *ctx)
+#define _CLI_COMMAND_HANDLER(name) enum cli_command_result name (__attribute__((unused)) const struct arg_builder *args, __attribute__((unused)) void *ctx)
+#define CLI_COMMAND_HANDLER(name) static _CLI_COMMAND_HANDLER(name)
 
-typedef CLI_COMMAND_HANDLER(cli_command_handler);
+typedef _CLI_COMMAND_HANDLER(cli_command_handler);
 
 struct cli_command
 {
