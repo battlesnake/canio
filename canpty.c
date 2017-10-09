@@ -163,6 +163,19 @@ REACTOR_REACTION(on_can_ctrl_data)
 	} while (0)
 
 	switch (cc->cmd) {
+	case cc_pid: {
+		struct cansh_ctrl_pid data;
+		GET_CC(data);
+		struct cansh_notify_pid res = {
+			.cmd = cn_pid,
+			.pid = state->pid
+		};
+		if (canio_write(state->can_stdio_fd, CANIO_ID(state->node_id, CANSH_FD_NOTIF), &res, sizeof(res)) < 0) {
+			callfail("canio_write");
+			return -1;
+		}
+		break;
+	}
 	case cc_signal: {
 		struct cansh_ctrl_signal data;
 		GET_CC(data);

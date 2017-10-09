@@ -36,10 +36,10 @@ struct program_state
 	int node_id;
 	bool master;
 	bool forward_signals;
-	bool show_control;
+	bool verbose;
 
 	int can_stdio_fd;
-	int can_ctrl_fd;
+	int can_ctrl_notify_fd;
 	int signal_fd;
 	int signal_fwd_fd;
 };
@@ -79,6 +79,18 @@ static int send_resize(struct program_state *state, int width, int height)
 		return -1;
 	}
 	return send_signal(state, SIGWINCH);
+}
+
+static int request_pid(struct program_state *state)
+{
+	struct cansh_ctrl_pid data = {
+		.cmd = cc_pid
+	};
+	if (canio_write(state->can_stdio_fd, CANIO_ID(state->node_id, CANSH_FD_CTRL), &data, sizeof(data)) < 0) {
+		callfail("canio_write");
+		return -1;
+	}
+	return 0;
 }
 
 static ssize_t calc_write_length_isig(size_t maxlen, const char *buf, size_t buflen, int *sig)
@@ -219,21 +231,6 @@ REACTOR_REACTION(on_can_stdio_data)
 	return 0;
 }
 
-REACTOR_REACTION(on_can_ctrl_data)
-{
-	struct program_state *state = ctx;
-	char buf[8];
-	uint32_t id;
-	ssize_t len;
-	if ((len = canio_read(state->can_ctrl_fd, &id, buf, sizeof(buf))) < 0) {
-		callfail("canio_read");
-		return -1;
-	}
-	if (!state->show_control) {
-		return 0;
-	}
-	const struct cansh_ctrl *cc = (const void *) buf;
-
 #define GET_CC(var) do { \
 		if ((size_t) len != sizeof(var)) { \
 			error("Invalid control message received (invalid length, %zu != %zu)", len, sizeof(var)); \
@@ -242,7 +239,30 @@ REACTOR_REACTION(on_can_ctrl_data)
 		memcpy(&var, cc, sizeof(var)); \
 	} while (0)
 
+REACTOR_REACTION(on_can_ctrl_data)
+{
+	struct program_state *state = ctx;
+	char buf[8];
+	uint32_t id;
+	ssize_t len;
+	if ((len = canio_read(state->can_ctrl_notify_fd, &id, buf, sizeof(buf))) < 0) {
+		callfail("canio_read");
+		return -1;
+	}
+	if (!state->verbose) {
+		return 0;
+	}
+	const struct cansh_ctrl *cc = (const void *) buf;
+
+	/* Macro to validate length of input before reading it */
+
 	switch (cc->cmd) {
+	case cc_pid: {
+		struct cansh_ctrl_pid data;
+		GET_CC(data);
+		info("Pid request received from remote");
+		break;
+	}
 	case cc_signal: {
 		struct cansh_ctrl_signal data;
 		GET_CC(data);
@@ -271,9 +291,41 @@ REACTOR_REACTION(on_can_ctrl_data)
 		error("Unknown control message received (command=0x%02hhx, arg=0x%02hhx)", cc->cmd, cc->arg);
 		break;
 	}
-#undef GET_CC
 	return 0;
 }
+
+REACTOR_REACTION(on_can_notify_data)
+{
+	struct program_state *state = ctx;
+	char buf[8];
+	uint32_t id;
+	ssize_t len;
+	if ((len = canio_read(state->can_ctrl_notify_fd, &id, buf, sizeof(buf))) < 0) {
+		callfail("canio_read");
+		return -1;
+	}
+	if (!state->verbose) {
+		return 0;
+	}
+	const struct cansh_ctrl *cc = (const void *) buf;
+
+	/* Macro to validate length of input before reading it */
+
+	switch (cc->cmd) {
+	case cn_pid: {
+		struct cansh_notify_pid data;
+		GET_CC(data);
+		info("Pid response received from remote: pid=%d", (int) data.pid);
+		break;
+	}
+	default:
+		error("Unknown notification message received (notification=0x%02hhx, arg=0x%02hhx)", cc->cmd, cc->arg);
+		break;
+	}
+	return 0;
+}
+
+#undef GET_CC
 
 static int run_loop(struct program_state *state)
 {
@@ -299,7 +351,7 @@ static int run_loop(struct program_state *state)
 		goto fail;
 	}
 
-	if (reactor_bind(&state->reactor, state->can_ctrl_fd, NULL, on_can_ctrl_data, NULL, NULL)) {
+	if (reactor_bind(&state->reactor, state->can_ctrl_notify_fd, NULL, state->master ? on_can_notify_data : on_can_ctrl_data, NULL, NULL)) {
 		callfail("reactor_bind");
 		goto fail;
 	}
@@ -325,11 +377,11 @@ done:
 
 static void show_syntax(const char *argv0)
 {
-	log_plain("Syntax: %s [ -m | -M ] [-q] -n <node_id> -i <iface>", argv0);
+	log_plain("Syntax: %s [ -m | -M ] [-v] -n <node_id> -i <iface>", argv0);
 	log_plain("");
 	log_plain("      -m        Master mode");
 	log_plain("      -M        Master mode with signal forwarding (SIGQUIT ^\\ to exit)");
-	log_plain("      -q        Quiet mode (do not log control-channel messages)");
+	log_plain("      -v        Log control/notification messages");
 	log_plain("      -n id     Set slave ID to use / to connect to");
 	log_plain("      -i iface  Set network interface to use");
 	log_plain("");
@@ -342,9 +394,9 @@ int main(int argc, char *argv[])
 	struct program_state state;
 	memset(&state, 0, sizeof(state));
 	state.can_stdio_fd = -1;
-	state.can_ctrl_fd = -1;
+	state.can_ctrl_notify_fd = -1;
 	state.signal_fd = -1;
-	state.show_control = true;
+	state.verbose = false;
 	state.node_id = -1;
 	state.master = false;
 	state.forward_signals = false;
@@ -352,12 +404,12 @@ int main(int argc, char *argv[])
 	const char *iface = NULL;
 
 	int c;
-	while ((c = getopt(argc, argv, "hmMqn:i:")) != -1) {
+	while ((c = getopt(argc, argv, "hmMvn:i:")) != -1) {
 		switch (c) {
 		case 'h': show_syntax(argv[0]); return 0;
 		case 'M': state.forward_signals = true; /* fall-thru */
 		case 'm': state.master = true; break;
-		case 'q': state.show_control = false; break;
+		case 'v': state.verbose = true; break;
 		case 'n': state.node_id = atoi(optarg); break;
 		case 'i': iface = optarg; break;
 		default: error("Invalid argument: '%c'", c); return 1;
@@ -375,7 +427,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	state.can_ctrl_fd = canio_socket(iface, state.node_id, state.master ? CANSH_FD_NOTIF : CANSH_FD_CTRL);
+	state.can_ctrl_notify_fd = canio_socket(iface, state.node_id, state.master ? CANSH_FD_NOTIF : CANSH_FD_CTRL);
 	if (state.can_stdio_fd < 0) {
 		callfail("canio_socket");
 		return 1;
@@ -434,6 +486,7 @@ int main(int argc, char *argv[])
 
 	if (state.master) {
 		send_resize(&state, -1, -1);
+		request_pid(&state);
 	}
 
 	if (run_loop(&state) < 0) {
@@ -447,7 +500,7 @@ done:
 
 	close(state.signal_fwd_fd);
 	close(state.signal_fd);
-	close(state.can_ctrl_fd);
+	close(state.can_ctrl_notify_fd);
 	close(state.can_stdio_fd);
 
 	return ret;

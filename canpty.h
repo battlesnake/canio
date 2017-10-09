@@ -17,6 +17,17 @@ struct __attribute__((__packed__)) cansh_ctrl
 	};
 };
 
+struct __attribute__((__packed__)) cansh_ctrl_pid
+{
+	uint8_t cmd;
+};
+
+struct __attribute__((__packed__)) cansh_notify_pid
+{
+	uint8_t cmd;
+	uint32_t pid;
+};
+
 struct __attribute__((__packed__)) cansh_ctrl_signal
 {
 	uint8_t cmd;
@@ -38,10 +49,18 @@ struct __attribute__((__packed__)) cansh_ctrl_size
 
 enum cansh_ctrl_cmd
 {
+	/* Request pid */
+	cc_pid = 0,
 	/* Send signal */
 	cc_signal = 1,
 	/* Receive exit code */
 	cc_exit = 2,
 	/* Window resize (WINCH + size) */
 	cc_size = 3,
+};
+
+enum cansh_notify_cmd
+{
+	/* pid */
+	cn_pid = 0,
 };
