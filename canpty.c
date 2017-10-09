@@ -406,6 +406,17 @@ int main(int argc, char *argv[])
 	/* Disable echo, since we don't use the terminal at all */
 	termios_stdin_no_echo();
 
+	if (!state.master) {
+		/* Send PID notification */
+		struct cansh_notify_pid cmd = {
+			.cmd = cn_pid,
+			.pid = state.pid,
+		};
+		if (canio_write(state.can_stdio_fd, CANIO_ID(state.node_id, CANSH_FD_NOTIF), &cmd, sizeof(cmd)) < 0) {
+			callfail("canio_write");
+		}
+	}
+
 	int loop_result = run_loop(&state);
 
 	if (loop_result == -1) {
@@ -437,6 +448,7 @@ int main(int argc, char *argv[])
 
 	ret = child_result;
 
+	/* Send exit notification */
 	struct cansh_notify_exit res = {
 		.cmd = cn_exit,
 		.status = child_result

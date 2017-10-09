@@ -631,6 +631,15 @@ int main(int argc, char *argv[])
 			send_resize(&state, -1, -1);
 		}
 		request_pid(&state);
+	} else if (state.has_sub) {
+		/* Send PID notification */
+		struct cansh_notify_pid cmd = {
+			.cmd = cn_pid,
+			.pid = state.pid,
+		};
+		if (canio_write(state.can_stdio_fd, CANIO_ID(state.node_id, CANSH_FD_NOTIF), &cmd, sizeof(cmd)) < 0) {
+			callfail("canio_write");
+		}
 	}
 
 	int loop_result = run_loop(&state);
@@ -671,6 +680,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	/* Send exit notification */
 	struct cansh_notify_exit res = {
 		.cmd = cn_exit,
 		.status = child_result
