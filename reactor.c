@@ -29,16 +29,27 @@ void reactor_free(struct reactor *inst)
 
 int reactor_bind(struct reactor *inst, int fd, void *arg, reactor_reaction *read, reactor_reaction *write, reactor_reaction *error)
 {
+	if (fd == -1) {
+		return 0;
+	}
 	if (inst->count == inst->capacity) {
 		errno = ENOSPC;
 		return -1;
 	}
-	struct reactor_fd *rfd = &inst->rfd[inst->count++];
+	struct reactor_fd *rfd = &inst->rfd[inst->count];
 	rfd->fd = fd;
 	rfd->read = read;
 	rfd->write = write;
 	rfd->error = error;
 	rfd->arg = arg;
+	int prev = fcntl(fd, F_GETFL);
+	if (prev == -1) {
+		return -1;
+	}
+	if (fcntl(fd, F_SETFL, prev | O_NONBLOCK) == -1) {
+		return -1;
+	}
+	inst->count++;
 	return 0;
 }
 
