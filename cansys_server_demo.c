@@ -69,7 +69,7 @@ static int do_set_heartbeat_ms(void *arg, uint64_t *ms)
 		callfail("set_heartbeat_interval");
 		return -1;
 	}
-	info("Heartbeat interval changed to %lums", ms ? *ms : 0);
+	info("Heartbeat interval changed to %" PRIu64 "ms", ms ? *ms : 0);
 	return 0;
 }
 
@@ -101,7 +101,7 @@ static int do_uptime_ms(void *arg, uint64_t *out)
 
 static int do_reg_read(void *arg, uint16_t reg, uint64_t *value)
 {
-	info("Mock reg read %hu", reg);
+	info("Mock reg read %" PRIu16, reg);
 	const struct program_state *state = arg;
 	if (reg >= NREGS) {
 		return -ENOENT;
@@ -112,7 +112,7 @@ static int do_reg_read(void *arg, uint16_t reg, uint64_t *value)
 
 static int do_reg_write(void *arg, uint16_t reg, uint64_t *value)
 {
-	info("Mock reg write %hu <- %ld (%016lx)", reg, *value, *value);
+	info("Mock reg write %" PRIu16 " <- %" PRId64 " (%016" PRIx64 ")", reg, *value, *value);
 	struct program_state *state = arg;
 	if (reg >= NREGS) {
 		return -ENOENT;

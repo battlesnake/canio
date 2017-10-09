@@ -82,7 +82,7 @@ CLI_COMMAND_HANDLER(do_ping)
 		ds--;
 		dns += 1000000000;
 	}
-	info("RTT: %lu.%06ds", ds, dns / 1000);
+	info("RTT: %" PRIu64 ".%06" PRIu32 "s", ds, dns / 1000);
 	return ccr_success;
 }
 
@@ -135,7 +135,7 @@ CLI_COMMAND_HANDLER(do_reg)
 			error("%s", strerror(errno));
 			return ccr_fail;
 		}
-		info("Register %hu <- %ld (0x%010lx)\n", reg, value, value);
+		info("Register %" PRIu32 " <- %" PRId64 " (0x%010" PRIx64 ")\n", reg, value, value);
 		return ccr_success;
 	}
 	uint64_t value;
@@ -143,7 +143,7 @@ CLI_COMMAND_HANDLER(do_reg)
 		error("%s", strerror(errno));
 		return ccr_fail;
 	}
-	info("Register %hu -> %ld (0x%010lx)\n", reg, value, value);
+	info("Register %" PRIu32 " -> %" PRId64 " (0x%010" PRIx64 ")\n", reg, value, value);
 	return ccr_success;
 }
 
