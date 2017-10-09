@@ -27,8 +27,6 @@
 
 #include "canpty.h"
 
-#define CHILD_KILL_TIMEOUT 1000
-
 struct program_state
 {
 	struct reactor reactor;
@@ -72,6 +70,7 @@ REACTOR_REACTION(on_signal)
 	}
 	switch (si.ssi_signo) {
 	case SIGINT:
+		info("SIGINT");
 		/* Forward SIGINT to child process */
 		if (kill(state->pid, SIGINT) == -1) {
 			sysfail("kill(SIGINT)");
@@ -79,6 +78,7 @@ REACTOR_REACTION(on_signal)
 		}
 		return 0;
 	case SIGTSTP:
+		info("SIGTSTP");
 		/* Reset terminal, then stop */
 		termios_reset();
 		if (kill(state->pid, SIGTSTP) == -1) {
@@ -101,6 +101,7 @@ REACTOR_REACTION(on_signal)
 			sysfail("kill(SIGWINCH)");
 			return -1;
 		}
+		info("SIGCONT");
 		return 0;
 	default:
 		/* Other signals (SIGTERM / SIGCHLD) end the message loop */
@@ -313,6 +314,7 @@ int main(int argc, char *argv[])
 		callfail("canio_socket");
 		goto done;
 	}
+	set_cloexec(state.can_stdio_fd);
 
 	if (!state.master) {
 		state.can_ctrl_fd = canio_socket(iface, state.node_id, 3);
@@ -321,6 +323,7 @@ int main(int argc, char *argv[])
 			goto done;
 		}
 	}
+	set_cloexec(state.can_ctrl_fd);
 
 	sigset_t ss;
 
@@ -337,6 +340,7 @@ int main(int argc, char *argv[])
 		sysfail("signalfd");
 		goto done;
 	}
+	set_cloexec(state.signal_fd);
 
 	/* SIGCHLD receiver */
 	sigemptyset(&ss);
@@ -347,11 +351,6 @@ int main(int argc, char *argv[])
 		sysfail("signalfd");
 		goto done;
 	}
-
-	/* Set FD_CLOEXEC */
-	set_cloexec(state.can_ctrl_fd);
-	set_cloexec(state.can_stdio_fd);
-	set_cloexec(state.signal_fd);
 	set_cloexec(state.sigchld_fd);
 
 	/* Block signals which we want to handle via signalfd */
@@ -363,8 +362,7 @@ int main(int argc, char *argv[])
 	sigaddset(&ss, SIGCONT);
 	sigaddset(&ss, SIGCHLD);
 
-	sigset_t oss;
-	if (sigprocmask(SIG_BLOCK, &ss, &oss) < 0) {
+	if (sigprocmask(SIG_BLOCK, &ss, NULL) < 0) {
 		sysfail("sigprocmask");
 		goto done;
 	}
@@ -374,19 +372,37 @@ int main(int argc, char *argv[])
 	memset(&pty_size, 0, sizeof(pty_size));
 	pty_size.ws_col = 80;
 	pty_size.ws_row = 25;
+	int stderr_fd = dup(STDERR_FILENO);
+	if (stderr_fd < 0) {
+		sysfail("dup2");
+		goto done;
+	}
+	set_cloexec(stderr_fd);
 	state.pid = forkpty(&state.pty_fd, NULL, NULL, &pty_size);
 	if (state.pid < 0) {
 		sysfail("forkpty");
 		goto done;
 	} else if (state.pid == 0) {
 		/* Unblock signals in child process */
-		if (sigprocmask(SIG_SETMASK, &oss, NULL) < 0) {
+		sigset_t empty;
+		sigemptyset(&empty);
+		if (sigprocmask(SIG_SETMASK, &empty, NULL) < 0) {
 			sysfail("sigprocmask");
 			goto done;
 		}
 		char **args = argv + optind;
-		return execvp(args[0], args);
+		execvp(args[0], args);
+		int err = errno;
+		/* Restore stderr */
+		if (dup2(stderr_fd, STDERR_FILENO) < 0) {
+			sysfail("dup2");
+		}
+		/* Log error from execvp and exit */
+		errno = err;
+		sysfail("execvp");
+		exit(255);
 	}
+	close(stderr_fd);
 
 	info("Launched program with pid=%d", (int) state.pid);
 

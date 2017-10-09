@@ -11,9 +11,12 @@
 #include <termios.h>
 #include <signal.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <poll.h>
 
 #include <sys/signalfd.h>
 #include <sys/ioctl.h>
+#include <sys/wait.h>
 
 #include "log.h"
 #include "terminal.h"
@@ -37,10 +40,15 @@ struct program_state
 	bool master;
 	bool forward_signals;
 	bool verbose;
+	bool has_sub;
 
+	pid_t pid;
+	int stdin_fd;
+	int stdout_fd;
 	int can_stdio_fd;
 	int can_ctrl_notify_fd;
 	int signal_fd;
+	int sigchld_fd;
 	int signal_fwd_fd;
 };
 
@@ -66,8 +74,8 @@ static int send_resize(struct program_state *state, int width, int height)
 	};
 	if (width < 0) {
 		struct winsize w;
-		if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == -1 &&
-			ioctl(STDIN_FILENO, TIOCGWINSZ, &w) == -1) {
+		if (ioctl(state->stdout_fd, TIOCGWINSZ, &w) == -1 &&
+			ioctl(state->stdin_fd, TIOCGWINSZ, &w) == -1) {
 			errno = ENOTTY;
 			return -1;
 		}
@@ -124,6 +132,7 @@ static ssize_t calc_write_length_raw(size_t maxlen, size_t buflen)
 
 REACTOR_REACTION(on_signal)
 {
+	struct program_state *state = ctx;
 	struct signalfd_siginfo si;
 	if (read(fd, &si, sizeof(si)) != sizeof(si)) {
 		sysfail("read");
@@ -131,9 +140,23 @@ REACTOR_REACTION(on_signal)
 		return -1;
 	}
 	switch (si.ssi_signo) {
+	case SIGINT:
+		if (state->has_sub) {
+			if (kill(state->pid, SIGINT) == -1) {
+				sysfail("kill");
+				return -1;
+			}
+		}
+		return 0;
 	case SIGTSTP:
 		/* Reset terminal, then stop */
 		termios_reset();
+		if (state->has_sub) {
+			if (kill(state->pid, SIGTSTP) == -1) {
+				sysfail("kill");
+				return -1;
+			}
+		}
 		if (kill(getpid(), SIGSTOP) == -1) {
 			sysfail("kill");
 			return -1;
@@ -142,6 +165,12 @@ REACTOR_REACTION(on_signal)
 	case SIGCONT:
 		/* Resume, set terminal */
 		termios_stdin_no_echo();
+		if (state->has_sub) {
+			if (kill(state->pid, SIGCONT) == -1) {
+				sysfail("kill");
+				return -1;
+			}
+		}
 		return 0;
 	default:
 		reactor_end(reactor, si.ssi_signo);
@@ -158,7 +187,7 @@ REACTOR_REACTION(on_signal_fwd)
 		reactor_end(reactor, -1);
 		return -1;
 	}
-	if (si.ssi_signo == SIGWINCH) {
+	if (si.ssi_signo == SIGWINCH && !state->has_sub) {
 		if (send_resize(state, -1, -1)) {
 			callfail("send_resize");
 		}
@@ -174,7 +203,7 @@ REACTOR_REACTION(on_stdin_data)
 	struct program_state *state = ctx;
 	char buf[BUFSIZE];
 	size_t len;
-	if ((ssize_t) (len = read(STDIN_FILENO, buf, sizeof(buf))) < 0) {
+	if ((ssize_t) (len = read(state->stdin_fd, buf, sizeof(buf))) < 0) {
 		sysfail("read");
 		return -1;
 	}
@@ -224,7 +253,7 @@ REACTOR_REACTION(on_can_stdio_data)
 		callfail("canio_read");
 		return -1;
 	}
-	if (write(STDOUT_FILENO, buf, len) != len) {
+	if (write(state->stdout_fd, buf, len) != len) {
 		sysfail("write");
 		return -1;
 	}
@@ -327,16 +356,33 @@ REACTOR_REACTION(on_can_notify_data)
 
 #undef GET_CC
 
+static int set_cloexec(int fd)
+{
+	if (fd == -1) {
+		return 0;
+	}
+	if (fcntl(fd, F_SETFD, fcntl(fd, F_GETFD) | FD_CLOEXEC) == -1) {
+		sysfail("fcntl");
+		return -1;
+	}
+	return 0;
+}
+
 static int run_loop(struct program_state *state)
 {
 	int ret = 0;
 
-	if (reactor_init(&state->reactor, 6, state)) {
+	if (reactor_init(&state->reactor, 7, state)) {
 		callfail("reactor_init");
 		return -1;
 	}
 
 	if (reactor_bind(&state->reactor, state->signal_fd, NULL, on_signal, NULL, NULL)) {
+		callfail("reactor_bind");
+		goto fail;
+	}
+
+	if (reactor_bind(&state->reactor, state->sigchld_fd, NULL, on_signal, NULL, NULL)) {
 		callfail("reactor_bind");
 		goto fail;
 	}
@@ -356,7 +402,7 @@ static int run_loop(struct program_state *state)
 		goto fail;
 	}
 
-	if (reactor_bind(&state->reactor, STDIN_FILENO, NULL, on_stdin_data, NULL, NULL)) {
+	if (reactor_bind(&state->reactor, state->stdin_fd, NULL, on_stdin_data, NULL, NULL)) {
 		callfail("reactor_bind");
 		goto fail;
 	}
@@ -377,22 +423,27 @@ done:
 
 static void show_syntax(const char *argv0)
 {
-	log_plain("Syntax: %s [ -m | -M ] [-v] -n <node_id> -i <iface>", argv0);
+	log_plain("Syntax: %s [ -m | -M ] [-v] -n <node_id> -i <iface> [ -- args... ]", argv0);
 	log_plain("");
 	log_plain("      -m        Master mode");
 	log_plain("      -M        Master mode with signal forwarding (SIGQUIT ^\\ to exit)");
-	log_plain("      -v        Log control/notification messages");
+	log_plain("      -v        Log control/notification/subprocess messages");
 	log_plain("      -n id     Set slave ID to use / to connect to");
 	log_plain("      -i iface  Set network interface to use");
+	log_plain("    args...     Execute a program and pipe it's STDIO");
 	log_plain("");
 }
 
 int main(int argc, char *argv[])
 {
 	int ret = 255;
+	int child_result = -1;
 
 	struct program_state state;
 	memset(&state, 0, sizeof(state));
+	state.pid = -1;
+	state.stdin_fd = -1;
+	state.stdout_fd = -1;
 	state.can_stdio_fd = -1;
 	state.can_ctrl_notify_fd = -1;
 	state.signal_fd = -1;
@@ -401,7 +452,12 @@ int main(int argc, char *argv[])
 	state.master = false;
 	state.forward_signals = false;
 
+	int p0[2] = { -1, -1 };
+	int p1[2] = { -1, -1 };
+
 	const char *iface = NULL;
+	char **sub_argv = NULL;
+	int sub_argc = 0;
 
 	int c;
 	while ((c = getopt(argc, argv, "hmMvn:i:")) != -1) {
@@ -415,7 +471,12 @@ int main(int argc, char *argv[])
 		default: error("Invalid argument: '%c'", c); return 1;
 		}
 	}
-	if (state.node_id < 0 || !iface || optind != argc) {
+	state.has_sub = optind != argc;
+	if (state.has_sub) {
+		sub_argv = argv + optind;
+		sub_argc = argc - optind;
+	}
+	if (state.node_id < 0 || !iface) {
 		error("Invalid arguments");
 		show_syntax(argv[0]);
 		return 1;
@@ -426,12 +487,14 @@ int main(int argc, char *argv[])
 		callfail("canio_socket");
 		return 1;
 	}
+	set_cloexec(state.can_stdio_fd);
 
 	state.can_ctrl_notify_fd = canio_socket(iface, state.node_id, state.master ? CANSH_FD_NOTIF : CANSH_FD_CTRL);
 	if (state.can_stdio_fd < 0) {
 		callfail("canio_socket");
 		return 1;
 	}
+	set_cloexec(state.can_ctrl_notify_fd);
 
 	sigset_t ss;
 
@@ -448,6 +511,7 @@ int main(int argc, char *argv[])
 		sysfail("signalfd");
 		goto done;
 	}
+	set_cloexec(state.signal_fd);
 
 	/* Signal forwarder for USR1/USR2/WINCH */
 	sigemptyset(&ss);
@@ -462,6 +526,18 @@ int main(int argc, char *argv[])
 		sysfail("signalfd");
 		goto done;
 	}
+	set_cloexec(state.signal_fwd_fd);
+
+	/* SIGCHLD receiver */
+	sigemptyset(&ss);
+	sigaddset(&ss, SIGCHLD);
+
+	state.sigchld_fd = signalfd(-1, &ss, 0);
+	if (state.sigchld_fd < 0) {
+		sysfail("signalfd");
+		goto done;
+	}
+	set_cloexec(state.sigchld_fd);
 
 	/* Block signals which we handle via signalfd */
 	sigemptyset(&ss);
@@ -473,35 +549,118 @@ int main(int argc, char *argv[])
 	sigaddset(&ss, SIGUSR1);
 	sigaddset(&ss, SIGUSR2);
 	sigaddset(&ss, SIGWINCH);
+	sigaddset(&ss, SIGCHLD);
 	if (sigprocmask(SIG_BLOCK, &ss, NULL) < 0) {
 		sysfail("sigprocmask");
 		goto done;
 	}
 
 	/* Put terminal in character mode */
-	if (termios_stdin_char_mode(!state.forward_signals) < 0) {
+	if (isatty(STDIN_FILENO) && termios_stdin_char_mode(!state.forward_signals) < 0) {
 		callfail("termios_stdin_char_mode");
 		goto done;
 	}
 
+	if (sub_argc) {
+		if (pipe(p0) || pipe(p1)) {
+			sysfail("pipe");
+			goto done;
+		}
+		state.pid = fork();
+		if (state.pid == -1) {
+			sysfail("fork");
+			goto done;
+		} else if (state.pid == 0) {
+			/* Set up stdio pipes */
+			if (dup2(p0[0], STDIN_FILENO) < 0 || dup2(p1[1], STDOUT_FILENO) < 0) {
+				sysfail("dup2");
+				goto done;
+			}
+			close(p0[0]);
+			close(p0[1]);
+			close(p1[0]);
+			close(p1[1]);
+			/* Unblock signals */
+			sigset_t empty;
+			sigemptyset(&empty);
+			if (sigprocmask(SIG_SETMASK, &empty, NULL) < 0) {
+				sysfail("sigprocmask");
+				goto done;
+			}
+			/* Exec */
+			execvp(sub_argv[0], sub_argv);
+			sysfail("execv");
+			exit(255);
+		} else {
+			if (state.verbose) {
+				info("Launched program with pid=%d", (int) state.pid);
+			}
+			state.stdin_fd = p1[0];
+			state.stdout_fd = p0[1];
+			close(p0[0]);
+			close(p1[1]);
+		}
+	} else {
+		state.stdin_fd = STDIN_FILENO;
+		state.stdout_fd = STDOUT_FILENO;
+	}
+
 	if (state.master) {
-		send_resize(&state, -1, -1);
+		if (!state.has_sub) {
+			send_resize(&state, -1, -1);
+		}
 		request_pid(&state);
 	}
 
-	if (run_loop(&state) < 0) {
+	int loop_result = run_loop(&state);
+	if (loop_result < 0) {
 		callfail("run_loop");
 	}
 
 	ret = 0;
 
+	if (!state.has_sub) {
+		goto done;
+	}
+
+	if (loop_result != SIGCHLD) {
+		/* Terminate, kill after timeout if not dead */
+		if (kill(state.pid, SIGTERM) == -1) {
+			sysfail("kill");
+		}
+		struct pollfd pfd = { .fd = state.sigchld_fd, .events = POLLIN };
+		if (poll(&pfd, 1, CHILD_KILL_TIMEOUT) <= 0) {
+			if (kill(state.pid, SIGKILL) == -1) {
+				sysfail("kill");
+			}
+		}
+	}
+
+	/* Reap process and get exit code */
+	if (waitpid(state.pid, &child_result, 0) == -1) {
+		sysfail("waitpid");
+		goto done;
+	}
+
+	if (state.verbose) {
+		if (WIFEXITED(child_result)) {
+			info("Child process exited with code %d", WEXITSTATUS(child_result));
+		} else if (WIFSIGNALED(child_result)) {
+			info("Child process %s by signal", strsignal(WTERMSIG(child_result)));
+		}
+	}
+
 done:
-	termios_reset();
+	if (isatty(STDIN_FILENO)) {
+		termios_reset();
+	}
 
 	close(state.signal_fwd_fd);
 	close(state.signal_fd);
 	close(state.can_ctrl_notify_fd);
 	close(state.can_stdio_fd);
+	close(state.stdin_fd);
+	close(state.stdout_fd);
 
 	return ret;
 }

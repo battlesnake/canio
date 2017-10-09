@@ -64,3 +64,5 @@ enum cansh_notify_cmd
 	/* pid */
 	cn_pid = 0,
 };
+
+#define CHILD_KILL_TIMEOUT 1000
