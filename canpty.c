@@ -257,41 +257,39 @@ int main(int argc, char *argv[])
 	int ret = 255;
 	int child_result = -1;
 
-	bool master = false;
-	int node_id = -1;
-	const char *iface = NULL;
-
-	int c;
-	while ((c = getopt(argc, argv, "mn:i:")) != -1) {
-		switch (c) {
-		case 'm': master = true; break;
-		case 'n': node_id = atoi(optarg); break;
-		case 'i': iface = optarg; break;
-		default: error("Invalid argument: '%c'", c); return 1;
-		}
-	}
-	if (node_id < 0 || !iface || optind == argc) {
-		error("Syntax: %s [ -m ] -n <node_id> -i <iface> -- ...args", argv[0]);
-		return 1;
-	}
-
 	struct program_state state;
 	memset(&state, 0, sizeof(state));
-	state.master = master;
-	state.node_id = node_id;
+	state.master = false;
+	state.node_id = -1;
 	state.pty_fd = -1;
 	state.can_stdio_fd = -1;
 	state.can_ctrl_fd = -1;
 	state.pid = -1;
 
-	state.can_stdio_fd = canio_socket(iface, node_id, master ? 1 : 0);
+	const char *iface = NULL;
+
+	int c;
+	while ((c = getopt(argc, argv, "mn:i:")) != -1) {
+		switch (c) {
+		case 'm': state.master = true; break;
+		case 'n': state.node_id = atoi(optarg); break;
+		case 'i': iface = optarg; break;
+		default: error("Invalid argument: '%c'", c); return 1;
+		}
+	}
+	if (state.node_id < 0 || !iface || optind == argc) {
+		error("Syntax: %s [ -m ] -n <node_id> -i <iface> -- ...args", argv[0]);
+		return 1;
+	}
+
+	state.can_stdio_fd = canio_socket(iface, state.node_id, state.master ? 1 : 0);
 	if (state.can_stdio_fd < 0) {
 		callfail("canio_socket");
 		goto done;
 	}
 
-	if (!master) {
-		state.can_ctrl_fd = canio_socket(iface, node_id, 3);
+	if (!state.master) {
+		state.can_ctrl_fd = canio_socket(iface, state.node_id, 3);
 		if (state.can_ctrl_fd < 0) {
 			callfail("canio_socket");
 			goto done;

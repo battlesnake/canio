@@ -81,6 +81,35 @@ static int send_resize(struct program_state *state, int width, int height)
 	return send_signal(state, SIGWINCH);
 }
 
+static ssize_t calc_write_length_isig(size_t maxlen, const char *buf, size_t buflen, int *sig)
+{
+	/* Calculate length of block, translating signals as needed */
+	*sig = 0;
+	size_t send = 0;
+	size_t skip = 0;
+	for (size_t i = 0; i < maxlen && i < buflen; i++) {
+		switch (buf[i]) {
+		case C_SIGINT: *sig = SIGINT; break;
+		case C_SIGQUIT: *sig = SIGQUIT; break;
+		case C_SIGTSTP: *sig = SIGTSTP; break;
+		default: break;
+		}
+		skip = i + 1;
+		send = i + 1;
+		if (*sig) {
+			send--;
+			break;
+		}
+	}
+	return skip;
+}
+
+static ssize_t calc_write_length_raw(size_t maxlen, size_t buflen)
+{
+	/* Calculate length of block, verbatim */
+	return buflen > maxlen ? maxlen : buflen;
+}
+
 REACTOR_REACTION(on_signal)
 {
 	struct signalfd_siginfo si;
@@ -128,34 +157,6 @@ REACTOR_REACTION(on_signal_fwd)
 	return 0;
 }
 
-static ssize_t write_isig(const char *buf, const size_t buflen, int *sig)
-{
-	*sig = 0;
-	size_t send = 0;
-	size_t skip = 0;
-	for (size_t i = 0; i < 8 && i < buflen; i++) {
-		switch (buf[i]) {
-		case C_SIGINT: *sig = SIGINT; break;
-		case C_SIGQUIT: *sig = SIGQUIT; break;
-		case C_SIGTSTP: *sig = SIGTSTP; break;
-		default: break;
-		}
-		skip = i + 1;
-		send = i + 1;
-		if (*sig) {
-			send--;
-			break;
-		}
-	}
-	return skip;
-}
-
-static ssize_t write_raw(const size_t buflen)
-{
-	const size_t send = buflen > 8 ? 8 : buflen;
-	return send;
-}
-
 REACTOR_REACTION(on_stdin_data)
 {
 	struct program_state *state = ctx;
@@ -172,13 +173,13 @@ REACTOR_REACTION(on_stdin_data)
 		int sig = 0;
 		if (state->forward_signals) {
 			/* Write blocks with signal translation */
-			if ((ssize_t) (sent = write_isig(p, len, &sig)) < 0) {
+			if ((ssize_t) (sent = calc_write_length_isig(CAN_DATA_LEN, p, len, &sig)) < 0) {
 				callfail("write_isig");
 				return -1;
 			}
 		} else {
 			/* Write blocks raw */
-			if ((ssize_t) (sent = write_raw(len)) < 0) {
+			if ((ssize_t) (sent = calc_write_length_raw(CAN_DATA_LEN, len)) < 0) {
 				callfail("write_raw");
 				return -1;
 			}
