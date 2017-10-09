@@ -254,13 +254,13 @@ done:
 
 static void show_syntax(const char *argv0)
 {
-	info("Syntax: %s [-m] -n <node_id> -i <iface> -- <args>...", argv0);
-	info("");
-	info("      -m        Master mode");
-	info("      -n id     Set slave ID to use / to connect to");
-	info("      -i iface  Set network interface to use");
-	info("    args...     Program to execute");
-	info("");
+	log_plain("Syntax: %s [-m] -n <node_id> -i <iface> -- <args>...", argv0);
+	log_plain("");
+	log_plain("      -m        Master mode");
+	log_plain("      -n id     Set slave ID to use / to connect to");
+	log_plain("      -i iface  Set network interface to use");
+	log_plain("    args...     Program to execute");
+	log_plain("");
 }
 
 int main(int argc, char *argv[])

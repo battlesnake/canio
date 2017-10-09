@@ -325,14 +325,14 @@ done:
 
 static void show_syntax(const char *argv0)
 {
-	info("Syntax: %s [ -m | -M ] [-q] -n <node_id> -i <iface>", argv0);
-	info("");
-	info("      -m        Master mode");
-	info("      -M        Master mode with signal forwarding (SIGQUIT ^\\ to exit)");
-	info("      -q        Quiet mode (do not log control-channel messages)");
-	info("      -n id     Set slave ID to use / to connect to");
-	info("      -i iface  Set network interface to use");
-	info("");
+	log_plain("Syntax: %s [ -m | -M ] [-q] -n <node_id> -i <iface>", argv0);
+	log_plain("");
+	log_plain("      -m        Master mode");
+	log_plain("      -M        Master mode with signal forwarding (SIGQUIT ^\\ to exit)");
+	log_plain("      -q        Quiet mode (do not log control-channel messages)");
+	log_plain("      -n id     Set slave ID to use / to connect to");
+	log_plain("      -i iface  Set network interface to use");
+	log_plain("");
 }
 
 int main(int argc, char *argv[])
