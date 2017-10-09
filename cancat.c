@@ -323,6 +323,18 @@ done:
 	return ret;
 }
 
+static void show_syntax(const char *argv0)
+{
+	info("Syntax: %s [ -m | -M ] [-q] -n <node_id> -i <iface>", argv0);
+	info("");
+	info("      -m        Master mode");
+	info("      -M        Master mode with signal forwarding (SIGQUIT ^\\ to exit)");
+	info("      -q        Quiet mode (do not log control-channel messages)");
+	info("      -n id     Set slave ID to use / to connect to");
+	info("      -i iface  Set network interface to use");
+	info("");
+}
+
 int main(int argc, char *argv[])
 {
 	int ret = 255;
@@ -340,8 +352,9 @@ int main(int argc, char *argv[])
 	const char *iface = NULL;
 
 	int c;
-	while ((c = getopt(argc, argv, "mMqn:i:")) != -1) {
+	while ((c = getopt(argc, argv, "hmMqn:i:")) != -1) {
 		switch (c) {
+		case 'h': show_syntax(argv[0]); return 0;
 		case 'M': state.forward_signals = true; /* fall-thru */
 		case 'm': state.master = true; break;
 		case 'q': state.show_control = false; break;
@@ -351,7 +364,8 @@ int main(int argc, char *argv[])
 		}
 	}
 	if (state.node_id < 0 || !iface || optind != argc) {
-		error("Syntax: %s [ -m | -M ] [-q] -n <node_id> -i <iface>", argv[0]);
+		error("Invalid arguments");
+		show_syntax(argv[0]);
 		return 1;
 	}
 

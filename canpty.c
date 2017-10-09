@@ -252,6 +252,17 @@ done:
 	return ret;
 }
 
+static void show_syntax(const char *argv0)
+{
+	info("Syntax: %s [-m] -n <node_id> -i <iface> -- <args>...", argv0);
+	info("");
+	info("      -m        Master mode");
+	info("      -n id     Set slave ID to use / to connect to");
+	info("      -i iface  Set network interface to use");
+	info("    args...     Program to execute");
+	info("");
+}
+
 int main(int argc, char *argv[])
 {
 	int ret = 255;
@@ -269,8 +280,9 @@ int main(int argc, char *argv[])
 	const char *iface = NULL;
 
 	int c;
-	while ((c = getopt(argc, argv, "mn:i:")) != -1) {
+	while ((c = getopt(argc, argv, "hmn:i:")) != -1) {
 		switch (c) {
+		case 'h': show_syntax(argv[0]); return 0;
 		case 'm': state.master = true; break;
 		case 'n': state.node_id = atoi(optarg); break;
 		case 'i': iface = optarg; break;
@@ -278,7 +290,8 @@ int main(int argc, char *argv[])
 		}
 	}
 	if (state.node_id < 0 || !iface || optind == argc) {
-		error("Syntax: %s [ -m ] -n <node_id> -i <iface> -- ...args", argv[0]);
+		error("Invalid arguments");
+		show_syntax(argv[0]);
 		return 1;
 	}
 
@@ -298,10 +311,11 @@ int main(int argc, char *argv[])
 
 	sigset_t ss;
 
-	/* SIGTERM/SIGINT/SIGTSTP/SIGCONT receiver */
+	/* SIGTERM/SIGINT/SIGQUIT/SIGTSTP/SIGCONT receiver */
 	sigemptyset(&ss);
 	sigaddset(&ss, SIGTERM);
 	sigaddset(&ss, SIGINT);
+	sigaddset(&ss, SIGQUIT);
 	sigaddset(&ss, SIGTSTP);
 	sigaddset(&ss, SIGCONT);
 
@@ -347,9 +361,10 @@ int main(int argc, char *argv[])
 	sigemptyset(&ss);
 	sigaddset(&ss, SIGTERM);
 	sigaddset(&ss, SIGINT);
-	sigaddset(&ss, SIGCHLD);
+	sigaddset(&ss, SIGQUIT);
 	sigaddset(&ss, SIGTSTP);
 	sigaddset(&ss, SIGCONT);
+	sigaddset(&ss, SIGCHLD);
 
 	if (sigprocmask(SIG_BLOCK, &ss, NULL) < 0) {
 		sysfail("sigprocmask");
