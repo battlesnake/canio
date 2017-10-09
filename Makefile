@@ -7,6 +7,7 @@ LD = $(CC)
 
 ifeq ($(target),)
 machine := $(shell uname -m)
+CROSS_COMPILE :=
 ifeq ($(machine),x86_64)
 target=pc
 else
@@ -21,7 +22,7 @@ configured = y
 endif
 
 ifeq ($(target),am335x)
-CROSS_COMPILE = arm-linux-gnueabihf-
+CROSS_COMPILE ?= arm-linux-gnueabihf-
 CFLAGS = -march=armv7-a -mtune=cortex-a8 -mfpu=neon
 configured = y
 endif
