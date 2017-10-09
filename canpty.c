@@ -341,6 +341,21 @@ int main(int argc, char *argv[])
 	set_cloexec(state.signal_fd);
 	set_cloexec(state.sigchld_fd);
 
+	/* Block signals which we want to handle via signalfd */
+	sigemptyset(&ss);
+	sigaddset(&ss, SIGTERM);
+	sigaddset(&ss, SIGINT);
+	sigaddset(&ss, SIGQUIT);
+	sigaddset(&ss, SIGTSTP);
+	sigaddset(&ss, SIGCONT);
+	sigaddset(&ss, SIGCHLD);
+
+	sigset_t oss;
+	if (sigprocmask(SIG_BLOCK, &ss, &oss) < 0) {
+		sysfail("sigprocmask");
+		goto done;
+	}
+
 	/* Child process */
 	struct winsize pty_size;
 	memset(&pty_size, 0, sizeof(pty_size));
@@ -351,25 +366,17 @@ int main(int argc, char *argv[])
 		sysfail("forkpty");
 		goto done;
 	} else if (state.pid == 0) {
+		/* Unblock signals in child process */
+		if (sigprocmask(SIG_SETMASK, &oss, NULL) < 0) {
+			sysfail("sigprocmask");
+			goto done;
+		}
 		char **args = argv + optind;
 		return execvp(args[0], args);
 	}
 
 	info("Launched program with pid=%d", (int) state.pid);
 
-	/* Block signals which we want to handle via signalfd */
-	sigemptyset(&ss);
-	sigaddset(&ss, SIGTERM);
-	sigaddset(&ss, SIGINT);
-	sigaddset(&ss, SIGQUIT);
-	sigaddset(&ss, SIGTSTP);
-	sigaddset(&ss, SIGCONT);
-	sigaddset(&ss, SIGCHLD);
-
-	if (sigprocmask(SIG_BLOCK, &ss, NULL) < 0) {
-		sysfail("sigprocmask");
-		goto done;
-	}
 	/* Disable echo, since we don't use the terminal at all */
 	termios_stdin_no_echo();
 
