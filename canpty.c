@@ -46,6 +46,7 @@ struct program_state
 	bool sigchld;
 };
 
+/* Set the pty's window size */
 static int set_pty_size(struct program_state *state, int width, int height)
 {
 	struct winsize pty_size;
@@ -59,6 +60,7 @@ static int set_pty_size(struct program_state *state, int width, int height)
 	return 0;
 }
 
+/* Handle signals */
 REACTOR_REACTION(on_signal)
 {
 	struct program_state *state = ctx;
@@ -110,6 +112,7 @@ REACTOR_REACTION(on_signal)
 	}
 }
 
+/* Handle data from pty */
 REACTOR_REACTION(on_pty_data)
 {
 	struct program_state *state = ctx;
@@ -126,6 +129,7 @@ REACTOR_REACTION(on_pty_data)
 	return 0;
 }
 
+/* Handle data from CAN socket */
 REACTOR_REACTION(on_can_stdio_data)
 {
 	struct program_state *state = ctx;
@@ -143,6 +147,7 @@ REACTOR_REACTION(on_can_stdio_data)
 	return 0;
 }
 
+/* Handle control-channel commands */
 REACTOR_REACTION(on_can_ctrl_data)
 {
 	struct program_state *state = ctx;
@@ -155,6 +160,7 @@ REACTOR_REACTION(on_can_ctrl_data)
 	}
 	const struct cansh_ctrl *cc = (const void *) buf;
 
+	/* Macro for checking request size */
 #define GET_CC(var) do { \
 		if ((size_t) len != sizeof(var)) { \
 			error("Invalid control message received (invalid length, %zu != %zu)", len, sizeof(var)); \
@@ -165,6 +171,7 @@ REACTOR_REACTION(on_can_ctrl_data)
 
 	switch (cc->cmd) {
 	case cc_pid: {
+		/* PID request */
 		struct cansh_ctrl_pid data;
 		GET_CC(data);
 		struct cansh_notify_pid res = {
@@ -178,6 +185,7 @@ REACTOR_REACTION(on_can_ctrl_data)
 		break;
 	}
 	case cc_signal: {
+		/* Signal */
 		struct cansh_ctrl_signal data;
 		GET_CC(data);
 		if (kill(state->pid, data.signal) == -1) {
@@ -187,6 +195,7 @@ REACTOR_REACTION(on_can_ctrl_data)
 		break;
 	}
 	case cc_size: {
+		/* Window resize */
 		struct cansh_ctrl_size data;
 		GET_CC(data);
 		if (set_pty_size(state, data.width, data.height)) {
@@ -203,6 +212,7 @@ REACTOR_REACTION(on_can_ctrl_data)
 	return 0;
 }
 
+/* Set CLOEXEC on descriptor */
 static int set_cloexec(int fd)
 {
 	if (fd == -1) {
@@ -215,6 +225,7 @@ static int set_cloexec(int fd)
 	return 0;
 }
 
+/* Main event-loop */
 static int run_loop(struct program_state *state)
 {
 	int ret = 0;
@@ -279,6 +290,7 @@ int main(int argc, char *argv[])
 	int ret = 255;
 	int child_result = -1;
 
+	/* Defaults */
 	struct program_state state;
 	memset(&state, 0, sizeof(state));
 	state.master = false;
@@ -290,6 +302,7 @@ int main(int argc, char *argv[])
 
 	const char *iface = NULL;
 
+	/* Process parameters */
 	int c;
 	while ((c = getopt(argc, argv, "hmn:i:")) != -1) {
 		switch (c) {
@@ -305,6 +318,8 @@ int main(int argc, char *argv[])
 		show_syntax(argv[0]);
 		return 1;
 	}
+
+	/* Open CAN stdio and control channels */
 
 	state.can_stdio_fd = canio_socket(iface, state.node_id, state.master ? 1 : 0);
 	if (state.can_stdio_fd < 0) {
@@ -364,7 +379,7 @@ int main(int argc, char *argv[])
 		goto done;
 	}
 
-	/* Child process */
+	/* Child process (save stderr, in case exec fails) */
 	struct winsize pty_size;
 	memset(&pty_size, 0, sizeof(pty_size));
 	pty_size.ws_col = 80;
@@ -404,10 +419,15 @@ int main(int argc, char *argv[])
 	info("Launched program with pid=%d", (int) state.pid);
 
 	/* Disable echo, since we don't use the terminal at all */
-	termios_stdin_no_echo();
+	if (isatty(STDIN_FILENO)) {
+		termios_stdin_no_echo();
+	}
 
 	if (!state.master) {
-		/* Send PID notification */
+		/*
+		 * Send PID notification (causes cancat to send window size if
+		 * connected)
+		 */
 		struct cansh_notify_pid cmd = {
 			.cmd = cn_pid,
 			.pid = state.pid,
@@ -417,9 +437,9 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	/* Result is negative on error or signal which ended event-loop */
 	int loop_result = run_loop(&state);
-
-	if (loop_result == -1) {
+	if (loop_result < 0) {
 		callfail("run_loop");
 	}
 
@@ -427,6 +447,7 @@ int main(int argc, char *argv[])
 	close(state.pty_fd);
 	state.pty_fd = -1;
 
+	/* If child's exit didn't end the loop, kill the child */
 	if (loop_result != SIGCHLD) {
 		/* Terminate, kill after timeout if not dead */
 		if (kill(state.pid, SIGTERM) == -1) {
@@ -458,7 +479,9 @@ int main(int argc, char *argv[])
 	}
 
 done:
-	termios_reset();
+	if (isatty(STDIN_FILENO)) {
+		termios_reset();
+	}
 
 	close(state.pty_fd);
 	close(state.signal_fd);
@@ -470,6 +493,7 @@ done:
 		return ret;
 	}
 
+	/* Log exit status */
 	if (WIFEXITED(child_result)) {
 		info("Child process exited with code %d", WEXITSTATUS(child_result));
 	} else if (WIFSIGNALED(child_result)) {

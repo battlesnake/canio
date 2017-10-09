@@ -3,6 +3,8 @@
 #include <inttypes.h>
 #include "log.h"
 
+/* Argument vector builder (char by char), also dispatcher */
+
 #define MAXARGS 10
 #define MAXARGL 100
 typedef char arg_list[MAXARGS][MAXARGL];
@@ -32,6 +34,7 @@ enum cli_command_result
 };
 
 #define _CLI_COMMAND_HANDLER(name) enum cli_command_result name (__attribute__((unused)) const struct arg_builder *args, __attribute__((unused)) void *ctx)
+/* Useful macro for command executors */
 #define CLI_COMMAND_HANDLER(name) static _CLI_COMMAND_HANDLER(name)
 
 typedef _CLI_COMMAND_HANDLER(cli_command_handler);

@@ -5,6 +5,20 @@
 #include <inttypes.h>
 #include "canio.h"
 
+/*
+ * CANSYS is a server and client pair which communicate using a simple protocol
+ * over CANbus.
+ *
+ * The protocol supports:
+ *  * Discovery (via IDENT / PING / heartbeats)
+ *  * Hostname lookup (via IDENT)
+ *  * Pinging / latency measurement (via PING)
+ *  * Heartbeats (interval can be remotely changed)
+ *  * Reboot request
+ *  * Uptime query
+ *  * Register read/write (15-bit addresses, 40-bit values)
+ */
+
 //#define cansys_log(fmt, ...) log("<cansys> " fmt, ##__VA_ARGS__)
 #define cansys_log(fmt, ...)
 

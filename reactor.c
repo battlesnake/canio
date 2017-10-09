@@ -82,6 +82,9 @@ int reactor_cycle(struct reactor *inst, int timeout)
 				goto fail;
 			}
 		}
+		if (inst->ended) {
+			goto done;
+		}
 	}
 	/* Read */
 	for (size_t i = 0; i < inst->count; i++) {
@@ -91,6 +94,9 @@ int reactor_cycle(struct reactor *inst, int timeout)
 		if (pfd->revents & POLLIN && rfd->read(inst, inst->ctx, rfd->arg, rfd->fd)) {
 			goto fail;
 		}
+		if (inst->ended) {
+			goto done;
+		}
 	}
 	/* Write */
 	for (size_t i = 0; i < inst->count; i++) {
@@ -99,6 +105,9 @@ int reactor_cycle(struct reactor *inst, int timeout)
 		errno = 0;
 		if (pfd->revents & POLLOUT && rfd->write(inst, inst->ctx, rfd->arg, rfd->fd)) {
 			goto fail;
+		}
+		if (inst->ended) {
+			goto done;
 		}
 	}
 

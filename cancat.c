@@ -26,6 +26,7 @@
 
 #include "canpty.h"
 
+/* Control characters to map to signals if input is a tty */
 #define C_SIGINT ''
 #define C_SIGQUIT ''
 #define C_SIGTSTP ''
@@ -52,6 +53,7 @@ struct program_state
 	int signal_fwd_fd;
 };
 
+/* Send signal to remote program */
 static int send_signal(struct program_state *state, int signo)
 {
 	struct cansh_ctrl_signal data = {
@@ -65,6 +67,7 @@ static int send_signal(struct program_state *state, int signo)
 	return 0;
 }
 
+/* Send window-(re)size to remote program */
 static int send_resize(struct program_state *state, int width, int height)
 {
 	struct cansh_ctrl_size data = {
@@ -74,8 +77,8 @@ static int send_resize(struct program_state *state, int width, int height)
 	};
 	if (width < 0) {
 		struct winsize w;
-		if (ioctl(state->stdout_fd, TIOCGWINSZ, &w) == -1 &&
-			ioctl(state->stdin_fd, TIOCGWINSZ, &w) == -1) {
+		if (ioctl(state->stdin_fd, TIOCGWINSZ, &w) == -1 &&
+			ioctl(state->stdout_fd, TIOCGWINSZ, &w) == -1) {
 			errno = ENOTTY;
 			return -1;
 		}
@@ -89,6 +92,7 @@ static int send_resize(struct program_state *state, int width, int height)
 	return send_signal(state, SIGWINCH);
 }
 
+/* Request PID of remote program */
 static int request_pid(struct program_state *state)
 {
 	struct cansh_ctrl_pid data = {
@@ -101,9 +105,9 @@ static int request_pid(struct program_state *state)
 	return 0;
 }
 
+/* Calculate length of block, translating signals as needed */
 static ssize_t calc_write_length_isig(size_t maxlen, const char *buf, size_t buflen, int *sig)
 {
-	/* Calculate length of block, translating signals as needed */
 	*sig = 0;
 	size_t send = 0;
 	size_t skip = 0;
@@ -124,12 +128,13 @@ static ssize_t calc_write_length_isig(size_t maxlen, const char *buf, size_t buf
 	return skip;
 }
 
+/* Calculate length of block, verbatim */
 static ssize_t calc_write_length_raw(size_t maxlen, size_t buflen)
 {
-	/* Calculate length of block, verbatim */
 	return buflen > maxlen ? maxlen : buflen;
 }
 
+/* Handle certain signals */
 REACTOR_REACTION(on_signal)
 {
 	struct program_state *state = ctx;
@@ -141,6 +146,7 @@ REACTOR_REACTION(on_signal)
 	}
 	switch (si.ssi_signo) {
 	case SIGINT:
+		/* Pass SIGINT to child */
 		if (state->has_sub) {
 			if (kill(state->pid, SIGINT) == -1) {
 				sysfail("kill");
@@ -172,12 +178,16 @@ REACTOR_REACTION(on_signal)
 			}
 		}
 		return 0;
+	case SIGQUIT:
+		/* Fall through, exit event-loop */
 	default:
+		/* Exit event-loop */
 		reactor_end(reactor, si.ssi_signo);
 		return 0;
 	}
 }
 
+/* Handle signals which should be forwarded to the remote program */
 REACTOR_REACTION(on_signal_fwd)
 {
 	struct program_state *state = ctx;
@@ -187,6 +197,7 @@ REACTOR_REACTION(on_signal_fwd)
 		reactor_end(reactor, -1);
 		return -1;
 	}
+	/* Send window size before signal on WINCH */
 	if (si.ssi_signo == SIGWINCH && !state->has_sub) {
 		if (send_resize(state, -1, -1)) {
 			callfail("send_resize");
@@ -198,6 +209,7 @@ REACTOR_REACTION(on_signal_fwd)
 	return 0;
 }
 
+/* Read data from stdin and dispatch */
 REACTOR_REACTION(on_stdin_data)
 {
 	struct program_state *state = ctx;
@@ -207,8 +219,9 @@ REACTOR_REACTION(on_stdin_data)
 		sysfail("read");
 		return -1;
 	}
-	const char *p = buf;
 	uint32_t can_id = state->master ? CANIO_STDIN(state->node_id) : CANIO_STDOUT(state->node_id);
+	const char *p = buf;
+	/* Process data block by block */
 	while (len) {
 		size_t sent;
 		int sig = 0;
@@ -229,20 +242,24 @@ REACTOR_REACTION(on_stdin_data)
 			callfail("canio_write");
 			return -1;
 		}
+		/* SIGQUIT ends event loop, is not forwarded to remote program */
 		if (sig == SIGQUIT) {
 			reactor_end(reactor, sig);
 			return 0;
 		}
+		/* Send translated signals (except SIGQUIT) */
 		if (sig && send_signal(state, sig)) {
 			callfail("send_signal");
 			return -1;
 		}
+		/* Update iterator */
 		p += sent;
 		len -= sent;
 	}
 	return 0;
 }
 
+/* Copy data from CAN socket to stdout */
 REACTOR_REACTION(on_can_stdio_data)
 {
 	struct program_state *state = ctx;
@@ -260,6 +277,7 @@ REACTOR_REACTION(on_can_stdio_data)
 	return 0;
 }
 
+/* Size-validation macro */
 #define GET_CC(var) do { \
 		if ((size_t) len != sizeof(var)) { \
 			error("Invalid control message received (invalid length, %zu != %zu)", len, sizeof(var)); \
@@ -268,6 +286,7 @@ REACTOR_REACTION(on_can_stdio_data)
 		memcpy(&var, cc, sizeof(var)); \
 	} while (0)
 
+/* Handle commands from control channel */
 REACTOR_REACTION(on_can_ctrl_data)
 {
 	struct program_state *state = ctx;
@@ -278,10 +297,8 @@ REACTOR_REACTION(on_can_ctrl_data)
 		callfail("canio_read");
 		return -1;
 	}
+
 	const struct cansh_ctrl *cc = (const void *) buf;
-
-	/* Macro to validate length of input before reading it */
-
 	switch (cc->cmd) {
 	case cc_pid: {
 		struct cansh_ctrl_pid data;
@@ -332,6 +349,7 @@ REACTOR_REACTION(on_can_ctrl_data)
 	return 0;
 }
 
+/* Handle notifications from notification channel */
 REACTOR_REACTION(on_can_notify_data)
 {
 	struct program_state *state = ctx;
@@ -342,34 +360,39 @@ REACTOR_REACTION(on_can_notify_data)
 		callfail("canio_read");
 		return -1;
 	}
-	if (!state->verbose) {
-		return 0;
-	}
+
 	const struct cansh_ctrl *cc = (const void *) buf;
-
-	/* Macro to validate length of input before reading it */
-
 	switch (cc->cmd) {
 	case cn_pid: {
 		struct cansh_notify_pid data;
 		GET_CC(data);
-		info("Pid response received from remote: pid=%d", (int) data.pid);
+		if (state->verbose) {
+			info("Pid response received from remote: pid=%d", (int) data.pid);
+		}
+		/* Send window size */
+		if (state->master && isatty(state->stdin_fd)) {
+			send_resize(state, -1, -1);
+		}
 		break;
 	case cn_exit: {
 		struct cansh_notify_exit data;
 		GET_CC(data);
-		if (WIFEXITED(data.status)) {
-			info("Remote process exited with code %d", WEXITSTATUS(data.status));
-		} else if (WIFSIGNALED(data.status)) {
-			info("Remote process ended by signal: %d (%s)", WTERMSIG(data.status), strsignal(WTERMSIG(data.status)));
-		} else {
-			info("Remote process exited, exit status = %d", data.status);
+		if (state->verbose) {
+			if (WIFEXITED(data.status)) {
+				info("Remote process exited with code %d", WEXITSTATUS(data.status));
+			} else if (WIFSIGNALED(data.status)) {
+				info("Remote process ended by signal: %d (%s)", WTERMSIG(data.status), strsignal(WTERMSIG(data.status)));
+			} else {
+				info("Remote process exited, exit status = %d", data.status);
+			}
 		}
 		break;
 	}
 	}
 	default:
-		error("Unknown notification message received (notification=0x%02hhx, arg=0x%02hhx)", cc->cmd, cc->arg);
+		if (state->verbose) {
+			error("Unknown notification message received (notification=0x%02hhx, arg=0x%02hhx)", cc->cmd, cc->arg);
+		}
 		break;
 	}
 	return 0;
@@ -377,6 +400,7 @@ REACTOR_REACTION(on_can_notify_data)
 
 #undef GET_CC
 
+/* Set CLOEXEC on descriptor */
 static int set_cloexec(int fd)
 {
 	if (fd == -1) {
@@ -389,6 +413,7 @@ static int set_cloexec(int fd)
 	return 0;
 }
 
+/* Main event-loop */
 static int run_loop(struct program_state *state)
 {
 	int ret = 0;
@@ -460,6 +485,7 @@ int main(int argc, char *argv[])
 	int ret = 255;
 	int child_result = -1;
 
+	/* Defaults */
 	struct program_state state;
 	memset(&state, 0, sizeof(state));
 	state.pid = -1;
@@ -480,6 +506,7 @@ int main(int argc, char *argv[])
 	char **sub_argv = NULL;
 	int sub_argc = 0;
 
+	/* Process parameters */
 	int c;
 	while ((c = getopt(argc, argv, "hmMvn:i:")) != -1) {
 		switch (c) {
@@ -502,6 +529,13 @@ int main(int argc, char *argv[])
 		show_syntax(argv[0]);
 		return 1;
 	}
+
+	/* Warn when enabling signal processing for non-TTY input */
+	if (state.forward_signals && (!isatty(STDIN_FILENO) || state.has_sub) && state.verbose) {
+		warn("Signal forwarding is enabled but input is not a TTY");
+	}
+
+	/* Open CAN stdio and notification channels */
 
 	state.can_stdio_fd = canio_socket(iface, state.node_id, state.master ? 1 : 0);
 	if (state.can_stdio_fd < 0) {
@@ -582,6 +616,7 @@ int main(int argc, char *argv[])
 		goto done;
 	}
 
+	/* If subprocess was specified, fork it and set up stdio pipes */
 	if (sub_argc) {
 		if (pipe(p0) || pipe(p1)) {
 			sysfail("pipe");
@@ -612,25 +647,27 @@ int main(int argc, char *argv[])
 			execvp(sub_argv[0], sub_argv);
 			sysfail("execv");
 			exit(255);
-		} else {
-			if (state.verbose) {
-				info("Launched program with pid=%d", (int) state.pid);
-			}
-			state.stdin_fd = p1[0];
-			state.stdout_fd = p0[1];
-			close(p0[0]);
-			close(p1[1]);
 		}
+		if (state.verbose) {
+			info("Launched program with pid=%d", (int) state.pid);
+		}
+		state.stdin_fd = p1[0];
+		state.stdout_fd = p0[1];
+		close(p0[0]);
+		close(p1[1]);
 	} else {
+		/* If not using subprocess, use default stdio */
 		state.stdin_fd = STDIN_FILENO;
 		state.stdout_fd = STDOUT_FILENO;
 	}
 
 	if (state.master) {
-		if (!state.has_sub) {
-			send_resize(&state, -1, -1);
-		}
+		/* If we're a master, request PID */
 		request_pid(&state);
+		/*
+		 * Receiving a PID triggers sending of window size if we're a
+		 * master, so the remote will fit in our terminal
+		 */
 	} else if (state.has_sub) {
 		/* Send PID notification */
 		struct cansh_notify_pid cmd = {
@@ -642,6 +679,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	/* Result is negative on error or signal which ended event-loop */
 	int loop_result = run_loop(&state);
 	if (loop_result < 0) {
 		callfail("run_loop");
@@ -649,10 +687,12 @@ int main(int argc, char *argv[])
 
 	ret = 0;
 
+	/* If we don't have a subprocess, skip the clean-up */
 	if (!state.has_sub) {
 		goto done;
 	}
 
+	/* If child's exit didn't end the loop, kill the child */
 	if (loop_result != SIGCHLD) {
 		/* Terminate, kill after timeout if not dead */
 		if (kill(state.pid, SIGTERM) == -1) {
@@ -672,6 +712,7 @@ int main(int argc, char *argv[])
 		goto done;
 	}
 
+	/* Log exit status */
 	if (state.verbose) {
 		if (WIFEXITED(child_result)) {
 			info("Child process exited with code %d", WEXITSTATUS(child_result));

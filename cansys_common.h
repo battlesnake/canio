@@ -7,6 +7,8 @@
 
 #include "cansys.h"
 
+/* Function+macro for printing hex dump */
+
 #define cansys_printx(...)
 //#define cansys_printx cansys_printx_real
 
@@ -20,6 +22,11 @@ static __attribute__((unused)) void cansys_printx_real(const char *name, const v
 	}
 	printf("\n");
 }
+
+/*
+ * Functions for reading/writing integers as little-endian, with no trailing
+ * zero-bytes
+ */
 
 static __attribute__((unused)) uint64_t get_raw64(const void *buf, size_t buflen)
 {

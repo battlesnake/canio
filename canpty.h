@@ -1,8 +1,12 @@
 #pragma once
 #include <stdint.h>
 
+/* Descriptors for control and for notification channels */
 #define CANSH_FD_CTRL 3
 #define CANSH_FD_NOTIF 4
+
+/* Time (ms) between sending child-process TERM and KILL signals */
+#define CHILD_KILL_TIMEOUT 1000
 
 struct __attribute__((__packed__)) cansh_ctrl
 {
@@ -64,5 +68,3 @@ enum cansh_notify_cmd
 	/* Receive exit code */
 	cn_exit = 1,
 };
-
-#define CHILD_KILL_TIMEOUT 1000
