@@ -186,9 +186,6 @@ REACTOR_REACTION(on_can_ctrl_data)
 		}
 		break;
 	}
-	case cc_exit: {
-		break;
-	}
 	case cc_size: {
 		struct cansh_ctrl_size data;
 		GET_CC(data);
@@ -439,6 +436,14 @@ int main(int argc, char *argv[])
 	}
 
 	ret = child_result;
+
+	struct cansh_notify_exit res = {
+		.cmd = cn_exit,
+		.status = child_result
+	};
+	if (!state.master && canio_write(state.can_stdio_fd, CANIO_ID(state.node_id, CANSH_FD_NOTIF), &res, sizeof(res)) < 0) {
+		callfail("canio_write");
+	}
 
 done:
 	termios_reset();

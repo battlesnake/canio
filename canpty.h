@@ -34,7 +34,7 @@ struct __attribute__((__packed__)) cansh_ctrl_signal
 	uint8_t signal;
 };
 
-struct __attribute__((__packed__)) cansh_ctrl_exit
+struct __attribute__((__packed__)) cansh_notify_exit
 {
 	uint8_t cmd;
 	uint16_t status;
@@ -53,16 +53,16 @@ enum cansh_ctrl_cmd
 	cc_pid = 0,
 	/* Send signal */
 	cc_signal = 1,
-	/* Receive exit code */
-	cc_exit = 2,
 	/* Window resize (WINCH + size) */
-	cc_size = 3,
+	cc_size = 2,
 };
 
 enum cansh_notify_cmd
 {
 	/* pid */
 	cn_pid = 0,
+	/* Receive exit code */
+	cn_exit = 1,
 };
 
 #define CHILD_KILL_TIMEOUT 1000

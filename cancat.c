@@ -278,9 +278,6 @@ REACTOR_REACTION(on_can_ctrl_data)
 		callfail("canio_read");
 		return -1;
 	}
-	if (!state->verbose) {
-		return 0;
-	}
 	const struct cansh_ctrl *cc = (const void *) buf;
 
 	/* Macro to validate length of input before reading it */
@@ -289,35 +286,47 @@ REACTOR_REACTION(on_can_ctrl_data)
 	case cc_pid: {
 		struct cansh_ctrl_pid data;
 		GET_CC(data);
-		info("Pid request received from remote");
+		if (state->verbose) {
+			info("Pid request received from remote");
+		}
+		if (state->has_sub) {
+			struct cansh_notify_pid res = {
+				.cmd = cn_pid,
+				.pid = state->pid
+			};
+			if (canio_write(state->can_stdio_fd, CANIO_ID(state->node_id, CANSH_FD_NOTIF), &res, sizeof(res)) < 0) {
+				callfail("canio_write");
+				return -1;
+			}
+		}
 		break;
 	}
 	case cc_signal: {
 		struct cansh_ctrl_signal data;
 		GET_CC(data);
-		info("Signal received from remote: %d (%s)", data.signal, strsignal(data.signal));
-		break;
-	}
-	case cc_exit: {
-		struct cansh_ctrl_exit data;
-		GET_CC(data);
-		if (WIFEXITED(data.status)) {
-			info("Remote process exited with code %d", WEXITSTATUS(data.status));
-		} else if (WIFSIGNALED(data.status)) {
-			info("Remote process ended by signal: %d (%s)", WTERMSIG(data.status), strsignal(WTERMSIG(data.status)));
-		} else {
-			info("Remote process exited, exit status = %d", data.status);
+		if (state->verbose) {
+			info("Signal received from remote: %d (%s)", data.signal, strsignal(data.signal));
+		}
+		if (state->has_sub) {
+			if (kill(state->pid, data.signal) == -1) {
+				sysfail("kill");
+				return -1;
+			}
 		}
 		break;
 	}
 	case cc_size: {
 		struct cansh_ctrl_size data;
 		GET_CC(data);
-		info("Window resize notification from remote: %hux%hu", data.width, data.height);
+		if (state->verbose) {
+			info("Window resize notification from remote: %hux%hu", data.width, data.height);
+		}
 		break;
 	}
 	default:
-		error("Unknown control message received (command=0x%02hhx, arg=0x%02hhx)", cc->cmd, cc->arg);
+		if (state->verbose) {
+			error("Unknown control message received (command=0x%02hhx, arg=0x%02hhx)", cc->cmd, cc->arg);
+		}
 		break;
 	}
 	return 0;
@@ -346,6 +355,18 @@ REACTOR_REACTION(on_can_notify_data)
 		GET_CC(data);
 		info("Pid response received from remote: pid=%d", (int) data.pid);
 		break;
+	case cn_exit: {
+		struct cansh_notify_exit data;
+		GET_CC(data);
+		if (WIFEXITED(data.status)) {
+			info("Remote process exited with code %d", WEXITSTATUS(data.status));
+		} else if (WIFSIGNALED(data.status)) {
+			info("Remote process ended by signal: %d (%s)", WTERMSIG(data.status), strsignal(WTERMSIG(data.status)));
+		} else {
+			info("Remote process exited, exit status = %d", data.status);
+		}
+		break;
+	}
 	}
 	default:
 		error("Unknown notification message received (notification=0x%02hhx, arg=0x%02hhx)", cc->cmd, cc->arg);
@@ -648,6 +669,14 @@ int main(int argc, char *argv[])
 		} else if (WIFSIGNALED(child_result)) {
 			info("Child process %s by signal", strsignal(WTERMSIG(child_result)));
 		}
+	}
+
+	struct cansh_notify_exit res = {
+		.cmd = cn_exit,
+		.status = child_result
+	};
+	if (!state.master && canio_write(state.can_stdio_fd, CANIO_ID(state.node_id, CANSH_FD_NOTIF), &res, sizeof(res)) < 0) {
+		callfail("canio_write");
 	}
 
 done:
