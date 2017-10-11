@@ -201,6 +201,21 @@ REACTOR_REACTION(on_signal_fwd)
 	return 0;
 }
 
+/* Handle HUP */
+REACTOR_REACTION(on_stdin_error)
+{
+	struct program_state *state = ctx;
+	if (errno == ENOMSG) {
+		reactor_unbind(&state->reactor, fd);
+		reactor_shutdown(&state->reactor, 0);
+		if (state->verbose) {
+			info("End of input reached");
+		}
+		return 0;
+	}
+	return -1;
+}
+
 /* Read data from stdin and dispatch */
 REACTOR_REACTION(on_stdin_data)
 {
@@ -440,7 +455,7 @@ static int run_loop(struct program_state *state)
 		goto fail;
 	}
 
-	if (reactor_bind(&state->reactor, state->stdin_fd, NULL, on_stdin_data, NULL, NULL)) {
+	if (reactor_bind(&state->reactor, state->stdin_fd, NULL, on_stdin_data, NULL, on_stdin_error)) {
 		callfail("reactor_bind");
 		goto fail;
 	}
@@ -586,8 +601,9 @@ int main(int argc, char *argv[])
 	}
 	set_cloexec(state.sigchld_fd);
 
-	/* Block signals which we handle via signalfd */
+	/* Block signals which we handle via signalfd or other means */
 	sigemptyset(&ss);
+	sigfillset(&ss);
 	sigaddset(&ss, SIGTERM);
 	sigaddset(&ss, SIGQUIT);
 	sigaddset(&ss, SIGTSTP);
@@ -597,6 +613,8 @@ int main(int argc, char *argv[])
 	sigaddset(&ss, SIGUSR2);
 	sigaddset(&ss, SIGWINCH);
 	sigaddset(&ss, SIGCHLD);
+	sigaddset(&ss, SIGHUP);
+	sigaddset(&ss, SIGPIPE);
 	if (sigprocmask(SIG_BLOCK, &ss, NULL) < 0) {
 		sysfail("sigprocmask");
 		goto done;
