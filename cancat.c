@@ -492,13 +492,6 @@ int main(int argc, char *argv[])
 	int ret = 255;
 	int child_result = -1;
 
-	/* Environment */
-	char pidbuf[22];
-	snprintf(pidbuf, sizeof(pidbuf), "%zu", (size_t) getpid());
-	if (setenv("CANCAT_PID", pidbuf, true)) {
-		sysfail("setenv");
-	}
-
 	/* Defaults */
 	struct program_state state;
 	memset(&state, 0, sizeof(state));
@@ -542,6 +535,23 @@ int main(int argc, char *argv[])
 		error("Invalid arguments");
 		show_syntax(argv[0]);
 		return 1;
+	}
+
+	/* Environment */
+	char pidbuf[22];
+	snprintf(pidbuf, sizeof(pidbuf), "%zu", (size_t) getpid());
+	if (setenv("CANCAT_PID", pidbuf, true)) {
+		sysfail("setenv");
+	}
+	char nidbuf[22];
+	snprintf(nidbuf, sizeof(nidbuf), "%u", state.node_id);
+	if (setenv("CANCAT_NID", nidbuf, true)) {
+		sysfail("setenv");
+	}
+	if (state.master) {
+		if (setenv("CANCAT_MASTER", "", true)) {
+			sysfail("setenv");
+		}
 	}
 
 	/* Warn when enabling signal processing for non-TTY input */
