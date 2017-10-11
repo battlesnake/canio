@@ -12,7 +12,12 @@
  * The event loop uses poll(2).
  *
  *  * If a descriptor is in error state, then if an error callback is bound then
- *    it will be called - otherwise the event loop will exit (if no handler).
+ *    it will be called with errno set to EIO - otherwise the event loop will
+ *    exit (if no handler).
+ *
+ *  * If a descriptor is in hangup state, then if an error callback is bound then
+ *    it will be called with errno set to ENOMSG - otherwise the event loop will
+ *    exit (if no handler).
  *
  *  * If a descriptor with a read callback is readable, then the read callback
  *    will be called.

@@ -86,6 +86,20 @@ int reactor_cycle(struct reactor *inst, int timeout)
 			goto done;
 		}
 	}
+	/* Hangup */
+	for (size_t i = 0; i < inst->count; i++) {
+		const struct reactor_fd *rfd = &inst->rfd[i];
+		struct pollfd *pfd = &pfds[i];
+		if (pfd->revents & POLLHUP) {
+			errno = ENOMSG;
+			if (!rfd->error || rfd->error(inst, inst->ctx, rfd->arg, rfd->fd)) {
+				goto fail;
+			}
+		}
+		if (inst->ended) {
+			goto done;
+		}
+	}
 	/* Read */
 	for (size_t i = 0; i < inst->count; i++) {
 		const struct reactor_fd *rfd = &inst->rfd[i];
