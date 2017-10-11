@@ -31,13 +31,43 @@ While `cancat` does not handle these commands, it can log them for diagnostic pu
 The `-e` flag will cause STDERR of the child process to be dumped to the local
 terminal's standard error descriptor.
 
+
+Piping with other programs
+--------------------------
+
 If piping data into a `cancat` master, do not use super-master mode.  Using it would result in certain control characters in the piped input being translated to signals for the remote instead of being sent verbatim.
+
+
+You can have `cancat` send from some other program to a node then exit like so:
+
+	# cancat exits when the input is closed (HUP)
+	echo 'some data' | ./cancat -m -n 10 -i can0
+
+In this case, `cancat` will still dump any received data to standard output.
+
+
+You can have `cancat` receive data from a node for some other program like so:
+
+	# cancat exits when the output is closed (PIPE)
+	./cancat -m -n 10 -i can0 | tr [:upper:] [:lower:]
+
+In this case, `cancat` will also read data from standard input and send it to the remote node.
+To prevent this, using `cancat` as receiver only, redirect cancat's input from `/dev/null`.
+
+	# Reads from remote node, converting uppercase to lowercase before displaying
+	./cancat -m -n 10 -i can0 </dev/null | tr [:upper:] [:lower:]
+
+
+To redirect input and output of `cancat` to the same program instance (similar to `canpty` but with a pipe instead of a pseudoterminal), specify the program on the command line:
+
+	# Reads from remote node, converting uppercase to lowercase, before sending back to remote node
+	./cancat -m -n 3 -i can0 -- tr [:upper:] [:lower:]
 
 
 canpty
 ======
 
-Use to run a program locally in a PTY and make it available via cancat on the remote.
+Use to run a program locally in a PTY (pseudoterminal) and make it available via cancat on the remote.
 
 Example:
 
@@ -57,6 +87,11 @@ Example using `chat` program (http://www.samba.org/ppp) to mock a text conversat
 	./canpty -e -n 25 -i can0 -- chat -t 5 a-b-c-d e f
 	# Node B (master), run within <5s of starting slave
 	./canpty -e -m -n 25 -i can0 -- chat -t 5 b c e f
+
+
+Another `chat` example, logging into a system then running a test script:
+
+	./canpty -m -n 3 -i can0 -- chat -Sset 3 'ogin:-^C^D\c-ogin:' 'some_test_user' 'ssword:' 'some_test_password' '~$' './test_script'
 
 
 virtual can
@@ -86,7 +121,7 @@ It supports:
 
  * heartbeats - periodic "I'm alive" notifications, interval can be set by client.
 
-The mock server provided starts with uptime of zero and resets it (in addition to the heartbeat interval) on reboot.
-The registers in the mock server are all read/write and persist over mocked "reboots" although there is no requirement for registers to behave this way.
+The mock server provided starts with uptime of zero and resets it (in addition to the heartbeat interval) in response to a "reboot" command (mocked reboot).
+The registers in the mock server are all read/write and persist over mocked "reboots" although there is no requirement for registers to behave this way in real server implementations.
 
 The example client will ring the terminal bell (which may flash your screen or make some beep sound) on each heartbeat received.
