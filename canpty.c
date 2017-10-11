@@ -276,12 +276,13 @@ done:
 
 static void show_syntax(const char *argv0)
 {
-	log_plain("Syntax: %s [-m] -n <node_id> -i <iface> [-r] -- <args>...", argv0);
+	log_plain("Syntax: %s [-m] -n <node_id> -i <iface> [-r] [-e] -- <args>...", argv0);
 	log_plain("");
 	log_plain("      -m        Master mode");
 	log_plain("      -n id     Set slave ID to use / to connect to");
 	log_plain("      -i iface  Set network interface to use");
 	log_plain("      -r        Initialise pty to raw mode");
+	log_plain("      -e        Preserve stderr");
 	log_plain("    args...     Program to execute");
 	log_plain("");
 }
@@ -303,16 +304,18 @@ int main(int argc, char *argv[])
 
 	const char *iface = NULL;
 	bool raw = false;
+	bool preserve_stderr = false;
 
 	/* Process parameters */
 	int c;
-	while ((c = getopt(argc, argv, "hmn:i:r")) != -1) {
+	while ((c = getopt(argc, argv, "hmn:i:re")) != -1) {
 		switch (c) {
 		case 'h': show_syntax(argv[0]); return 0;
 		case 'm': state.master = true; break;
 		case 'n': state.node_id = atoi(optarg); break;
 		case 'i': iface = optarg; break;
 		case 'r': raw = true; break;
+		case 'e': preserve_stderr = true; break;
 		default: error("Invalid argument: '%c'", c); return 1;
 		}
 	}
@@ -400,20 +403,28 @@ int main(int argc, char *argv[])
 		sysfail("forkpty");
 		goto done;
 	} else if (state.pid == 0) {
+		/* Macro to restore stderr */
+#		define RESTORE_STDERR() \
+			if (stderr_fd != -1 && dup2(stderr_fd, STDERR_FILENO) < 0) { \
+				sysfail("dup2"); \
+			} else { \
+				stderr_fd = -1; \
+			}
 		/* Unblock signals in child process */
 		sigset_t empty;
 		sigemptyset(&empty);
 		if (sigprocmask(SIG_SETMASK, &empty, NULL) < 0) {
+			RESTORE_STDERR();
 			sysfail("sigprocmask");
 			goto done;
+		}
+		if (preserve_stderr) {
+			RESTORE_STDERR();
 		}
 		char **args = argv + optind;
 		execvp(args[0], args);
 		int err = errno;
-		/* Restore stderr */
-		if (dup2(stderr_fd, STDERR_FILENO) < 0) {
-			sysfail("dup2");
-		}
+		RESTORE_STDERR();
 		/* Log error from execvp and exit */
 		errno = err;
 		sysfail("execvp");
