@@ -124,11 +124,17 @@ done:
 int reactor_loop(struct reactor *inst, int *code)
 {
 	while (!reactor_ended(inst, code)) {
-		if (reactor_cycle(inst, -1)) {
-			return -1;
+		if (reactor_cycle(inst, inst->shutting_down ? 0 : -1)) {
+			return inst->shutting_down && errno == ETIMEDOUT ? 0 : -1;
 		}
 	}
 	return 0;
+}
+
+void reactor_shutdown(struct reactor *inst, int code)
+{
+	inst->shutting_down = true;
+	inst->code = code;
 }
 
 void reactor_end(struct reactor *inst, int code)

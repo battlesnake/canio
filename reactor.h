@@ -56,6 +56,7 @@ struct reactor
 	struct reactor_fd *rfd;
 	void *ctx;
 	bool ended;
+	bool shutting_down;
 	int code;
 };
 
@@ -77,6 +78,13 @@ int reactor_loop(struct reactor *inst, int *code);
  * Call from a callback to gracefully end the event-loop
  */
 void reactor_end(struct reactor *inst, int code);
+
+/*
+ * Call from a callback to gracefully end the event-loop once there are no more
+ * events to handle (code may be overridden by reactor_end call in subsequent
+ * handler)
+ */
+void reactor_shutdown(struct reactor *inst, int code);
 
 /*
  * Returns whether the even-loop ended gracefully, and returns the exit code ih
