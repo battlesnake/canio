@@ -145,15 +145,6 @@ REACTOR_REACTION(on_signal)
 		return -1;
 	}
 	switch (si.ssi_signo) {
-	case SIGINT:
-		/* Pass SIGINT to child */
-		if (state->has_sub) {
-			if (kill(state->pid, SIGINT) == -1) {
-				sysfail("kill");
-				return -1;
-			}
-		}
-		return 0;
 	case SIGTSTP:
 		/* Reset terminal, then stop */
 		termios_reset();
@@ -178,6 +169,7 @@ REACTOR_REACTION(on_signal)
 			}
 		}
 		return 0;
+	case SIGINT:
 	case SIGQUIT:
 		/* Fall through, exit event-loop */
 	default:
