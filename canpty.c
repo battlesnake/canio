@@ -506,14 +506,15 @@ done:
 
 	if (child_result < 0) {
 		error("Failed");
-		return ret;
+	} else if (WIFEXITED(child_result)) {
+		int status = WEXITSTATUS(child_result);
+		ret = status;
+		info("Child process exited with code %d", status);
+	} else if (WIFSIGNALED(child_result)) {
+		int signo = WTERMSIG(child_result);
+		ret = 128 + signo;
+		info("Child process %s by signal", strsignal(signo));
 	}
 
-	/* Log exit status */
-	if (WIFEXITED(child_result)) {
-		info("Child process exited with code %d", WEXITSTATUS(child_result));
-	} else if (WIFSIGNALED(child_result)) {
-		info("Child process %s by signal", strsignal(WTERMSIG(child_result)));
-	}
-	return child_result;
+	return ret;
 }

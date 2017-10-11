@@ -679,10 +679,12 @@ int main(int argc, char *argv[])
 
 	ret = 0;
 
-	/* If we don't have a subprocess, skip the clean-up */
+	/* If we don't have a subprocess, skip the subprocess clean-up */
 	if (!state.has_sub) {
 		goto done;
 	}
+
+	/* Subprocess cleanup */
 
 	/* If child's exit didn't end the loop, kill the child */
 	if (loop_result != SIGCHLD) {
@@ -705,11 +707,17 @@ int main(int argc, char *argv[])
 	}
 
 	/* Log exit status */
-	if (state.verbose) {
-		if (WIFEXITED(child_result)) {
-			info("Child process exited with code %d", WEXITSTATUS(child_result));
-		} else if (WIFSIGNALED(child_result)) {
-			info("Child process %s by signal", strsignal(WTERMSIG(child_result)));
+	if (WIFEXITED(child_result)) {
+		int status = WEXITSTATUS(child_result);
+		ret = status;
+		if (state.verbose) {
+			info("Child process exited with code %d", status);
+		}
+	} else if (WIFSIGNALED(child_result)) {
+		int signo = WTERMSIG(child_result);
+		ret = 128 + signo;
+		if (state.verbose) {
+			info("Child process %s by signal", strsignal(signo));
 		}
 	}
 
