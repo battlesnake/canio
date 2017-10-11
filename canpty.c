@@ -260,7 +260,7 @@ static int run_loop(struct program_state *state)
 		goto fail;
 	}
 
-	if (reactor_loop(&state->reactor, &ret)) {
+	if (reactor_loop(&state->reactor, &ret) && errno) {
 		callfail("reactor_loop");
 		goto fail;
 	}
