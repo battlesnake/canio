@@ -21,11 +21,12 @@ Example:
     ./cancat -n 10 -i can0
     # Now STDIN of node A appears on node B, STDOUT of node B appears on node A.
 
-You can exit `cancat` by issuing `SIGINT` with `Ctrl+C`, unless in super-master mode:
+You can exit `cancat` by issuing `SIGINT` with `Ctrl+C`, unless in super-master mode, in which case use `SIGQUIT` which is typically `Ctrl+\`.
 
 Using `-M` (super-master mode) instead of / in addition to `-m` will cause `SIGINT` (Ctrl+C) and `SIGTSTP` (Ctrl+Z) to be forwarded to the remote via the control channel, rather than affecting the local `cancat` instance.  `SIGQUIT` (`Ctrl+\`) still ends `cancat`.
 
-Using `-q` will suppress logging of commands received via the control channel (`cancat` does not handle these commands, but it can log them with the `-v` verbose option specified).
+Using `-v` will cause cancat to log commands received via the control channel.
+While `cancat` does not handle these commands, it can log them for diagnostic purposes.
 
 If piping data into a `cancat` master, do not use super-master mode.  Using it would result in certain control characters in the piped input being translated to signals for the remote instead of being sent verbatim.
 

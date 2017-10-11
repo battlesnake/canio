@@ -179,7 +179,7 @@ REACTOR_REACTION(on_signal)
 	}
 }
 
-/* Handle signals which should be forwarded to the remote program */
+/* Handle signals which should always be forwarded to the remote program */
 REACTOR_REACTION(on_signal_fwd)
 {
 	struct program_state *state = ctx;
@@ -189,7 +189,7 @@ REACTOR_REACTION(on_signal_fwd)
 		reactor_end(reactor, -1);
 		return -1;
 	}
-	/* Send window size before signal on WINCH */
+	/* Send window size before forwarding signal on WINCH */
 	if (si.ssi_signo == SIGWINCH && !state->has_sub) {
 		if (send_resize(state, -1, -1)) {
 			callfail("send_resize");
@@ -410,7 +410,7 @@ static int run_loop(struct program_state *state)
 {
 	int ret = 0;
 
-	if (reactor_init(&state->reactor, 7, state)) {
+	if (reactor_init(&state->reactor, 6, state)) {
 		callfail("reactor_init");
 		return -1;
 	}
