@@ -4,6 +4,4 @@ We can use that to track what state the child process is in so we know whether ^
 
 Merge cancat and canpty into one program with extra argument (-t/-T like ssh) and ssh-like default (`isatty(STDIN_FILENO)`?) to determine whether to allocate pty.
 
-Switch for canpty to have pty initialised to RAW mode.
-
-STDERR: Send STDERR over can descriptor #2.
+canpty: option to send STDERR over can descriptor #2.

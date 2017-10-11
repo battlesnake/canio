@@ -276,11 +276,12 @@ done:
 
 static void show_syntax(const char *argv0)
 {
-	log_plain("Syntax: %s [-m] -n <node_id> -i <iface> -- <args>...", argv0);
+	log_plain("Syntax: %s [-m] -n <node_id> -i <iface> [-r] -- <args>...", argv0);
 	log_plain("");
 	log_plain("      -m        Master mode");
 	log_plain("      -n id     Set slave ID to use / to connect to");
 	log_plain("      -i iface  Set network interface to use");
+	log_plain("      -r        Initialise pty to raw mode");
 	log_plain("    args...     Program to execute");
 	log_plain("");
 }
@@ -301,15 +302,17 @@ int main(int argc, char *argv[])
 	state.pid = -1;
 
 	const char *iface = NULL;
+	bool raw = false;
 
 	/* Process parameters */
 	int c;
-	while ((c = getopt(argc, argv, "hmn:i:")) != -1) {
+	while ((c = getopt(argc, argv, "hmn:i:r")) != -1) {
 		switch (c) {
 		case 'h': show_syntax(argv[0]); return 0;
 		case 'm': state.master = true; break;
 		case 'n': state.node_id = atoi(optarg); break;
 		case 'i': iface = optarg; break;
+		case 'r': raw = true; break;
 		default: error("Invalid argument: '%c'", c); return 1;
 		}
 	}
@@ -390,7 +393,9 @@ int main(int argc, char *argv[])
 		goto done;
 	}
 	set_cloexec(stderr_fd);
-	state.pid = forkpty(&state.pty_fd, NULL, NULL, &pty_size);
+	struct termios raw_config;
+	cfmakeraw(&raw_config);
+	state.pid = forkpty(&state.pty_fd, NULL, raw ? &raw_config : NULL, &pty_size);
 	if (state.pid < 0) {
 		sysfail("forkpty");
 		goto done;

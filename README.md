@@ -44,6 +44,8 @@ Example:
     ./cancat -m -n 2 -i can0
     # Now node A is running an interactive bash shell and node B can access it via CAN.
 
+Specify the `-r` flag to `canpty` to have the pty initialised to "raw mode".
+
 
 virtual can
 ===========
