@@ -28,6 +28,9 @@ Using `-M` (super-master mode) instead of / in addition to `-m` will cause `SIGI
 Using `-v` will cause cancat to log commands received via the control channel.
 While `cancat` does not handle these commands, it can log them for diagnostic purposes.
 
+The `-e` flag will cause STDERR of the child process to be dumped to the local
+terminal's standard error descriptor.
+
 If piping data into a `cancat` master, do not use super-master mode.  Using it would result in certain control characters in the piped input being translated to signals for the remote instead of being sent verbatim.
 
 
@@ -44,7 +47,16 @@ Example:
     ./cancat -m -n 2 -i can0
     # Now node A is running an interactive bash shell and node B can access it via CAN.
 
+
 Specify the `-r` flag to `canpty` to have the pty initialised to "raw mode".
+
+
+Example using `chat` program (http://www.samba.org/ppp) to mock a text conversation between two nodes:
+
+	# Node A (slave)
+	./canpty -e -n 25 -i can0 -- chat -t 5 a-b-c-d e f
+	# Node B (master), run within <5s of starting slave
+	./canpty -e -m -n 25 -i can0 -- chat -t 5 b c e f
 
 
 virtual can
