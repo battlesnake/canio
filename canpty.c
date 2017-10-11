@@ -292,6 +292,13 @@ int main(int argc, char *argv[])
 	int ret = 255;
 	int child_result = -1;
 
+	/* Environment */
+	char pidbuf[22];
+	snprintf(pidbuf, sizeof(pidbuf), "%zu", (size_t) getpid());
+	if (setenv("CANPTY_PID", pidbuf, true)) {
+		sysfail("setenv");
+	}
+
 	/* Defaults */
 	struct program_state state;
 	memset(&state, 0, sizeof(state));
