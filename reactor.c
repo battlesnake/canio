@@ -53,6 +53,19 @@ int reactor_bind(struct reactor *inst, int fd, void *arg, reactor_reaction *read
 	return 0;
 }
 
+int reactor_unbind(struct reactor *inst, int fd)
+{
+	bool found = false;
+	for (size_t i = 0; i < inst->count; i++) {
+		struct reactor_fd *rfd = &inst->rfd[i];
+		if (rfd->fd == fd) {
+			rfd->fd = -1;
+			found = true;
+		}
+	}
+	return found ? 0 : ENOENT;
+}
+
 int reactor_cycle(struct reactor *inst, int timeout)
 {
 	struct pollfd pfds[inst->count];

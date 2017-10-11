@@ -68,7 +68,11 @@ struct reactor
 int reactor_init(struct reactor *inst, size_t capacity, void *ctx);
 void reactor_free(struct reactor *inst);
 
+/* Bind FD to reactor */
 int reactor_bind(struct reactor *inst, int fd, void *arg, reactor_reaction *read, reactor_reaction *write, reactor_reaction *error);
+
+/* Unbind FD (does not free up space in list) */
+int reactor_unbind(struct reactor *inst, int fd);
 
 /* Run one cycle of the loop (with timeout), returns zero on success */
 int reactor_cycle(struct reactor *inst, int ms);
